@@ -17,6 +17,7 @@ use App\Http\Controllers\FactureController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\OrdreReparationController;
 use App\Http\Controllers\PermissionController;
+use App\Http\Controllers\ProfilController;
 use App\Http\Controllers\RapportController;
 use App\Http\Controllers\ParametreAtelierController;
 use App\Http\Controllers\RechercheController;
@@ -51,6 +52,11 @@ Route::middleware('auth')->group(function () {
     // ── Notifications ───────────────────────────────────────────
     Route::get('/notifications/{notification}/ouvrir', [NotificationController::class, 'ouvrir'])->name('notifications.ouvrir');
     Route::post('/notifications/tout-marquer-lu', [NotificationController::class, 'toutMarquerLu'])->name('notifications.tout-marquer-lu');
+
+    // ── Profil personnel (tout compte connecté) ────────────────
+    Route::get('/profil',              [ProfilController::class, 'edit'])->name('profil.edit');
+    Route::patch('/profil/mot-de-passe', [ProfilController::class, 'updatePassword'])->name('profil.password');
+    Route::patch('/profil/langue',       [ProfilController::class, 'updateLangue'])->name('profil.langue');
 
     // ── Clients ──────────────────────────────────────────────
     // create doit être avant {client} pour éviter le conflit de route

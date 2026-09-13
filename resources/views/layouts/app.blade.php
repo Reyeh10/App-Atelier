@@ -352,13 +352,16 @@
         {{-- User info + Toggle + Logout --}}
         <div class="border-t border-slate-700 px-4 py-4">
             <div class="flex items-center gap-2">
-                <div class="w-9 h-9 rounded-full bg-orange-500 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
-                    {{ strtoupper(substr(auth()->user()->name, 0, 1)) }}
-                </div>
-                <div class="flex-1 min-w-0">
-                    <p class="text-white text-sm font-medium truncate">{{ auth()->user()->name }}</p>
-                    <p class="text-slate-400 text-xs truncate">{{ auth()->user()->getRoleLabel() }}</p>
-                </div>
+                <a href="{{ route('profil.edit') }}" title="Mon profil"
+                   class="flex items-center gap-2 flex-1 min-w-0 rounded-lg px-1 py-1 -mx-1 hover:bg-slate-800 transition-colors {{ request()->routeIs('profil.*') ? 'bg-slate-800' : '' }}">
+                    <div class="w-9 h-9 rounded-full bg-orange-500 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
+                        {{ strtoupper(substr(auth()->user()->name, 0, 1)) }}
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <p class="text-white text-sm font-medium truncate">{{ auth()->user()->name }}</p>
+                        <p class="text-slate-400 text-xs truncate">{{ auth()->user()->getRoleLabel() }}</p>
+                    </div>
+                </a>
 
                 {{-- Bouton mode nuit/clair --}}
                 <button id="btn-theme" onclick="toggleTheme()" title="Basculer mode nuit/clair"
@@ -405,7 +408,7 @@
                     @endif
                 </div>
             </div>
-            <div class="flex items-center gap-2 sm:gap-3 flex-shrink-0 overflow-x-auto">
+            <div class="flex flex-wrap items-center justify-end gap-2 sm:gap-3 flex-shrink-0">
 
                 {{-- Cloche de notifications --}}
                 @php
