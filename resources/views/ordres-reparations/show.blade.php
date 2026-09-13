@@ -274,12 +274,12 @@
                 <span class="text-xs text-slate-400 font-normal">({{ $or->allDevis->count() }})</span>
                 @endif
             </h3>
-            @if(!$or->devis && $or->type !== 'garantie' && auth()->user()->canManageWorkshop())
+            @if(!$or->devis && $or->type !== 'garantie' && auth()->user()->hasPermission('gerer_devis'))
             <a href="{{ route('devis.create', $or) }}"
                class="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-2 rounded-xl transition-colors">
                 + Créer un devis
             </a>
-            @elseif($or->devis && $or->devis->statut === 'accepte' && $or->type !== 'garantie' && auth()->user()->canManageWorkshop())
+            @elseif($or->devis && $or->devis->statut === 'accepte' && $or->type !== 'garantie' && auth()->user()->hasPermission('gerer_devis'))
             <a href="{{ route('devis.create', $or) }}"
                class="bg-indigo-500 hover:bg-indigo-600 text-white text-xs font-bold px-4 py-2 rounded-xl transition-colors">
                 + Devis complémentaire

@@ -18,7 +18,10 @@ $cog = 'M495.9 166.6c3.2 8.7.5 18.4-6.4 24.6l-43.3 39.4c1.1 8.3 1.7 16.8 1.7 25.
 <div class="min-h-screen flex">
 
     {{-- ════════ PANNEAU GAUCHE — BRANDING ════════ --}}
-    <div class="hidden lg:flex lg:w-7/12 relative overflow-hidden flex-col items-center justify-center"
+    {{-- overflow-y-auto + my-auto sur le contenu : le bloc reste centré quand la
+         fenêtre est assez haute, et devient défilable sans chevauchement quand
+         elle est courte (le pied de page ne recouvre plus la liste). --}}
+    <div class="hidden lg:flex lg:w-7/12 relative overflow-y-auto overflow-x-hidden flex-col items-center py-12"
          style="background: linear-gradient(145deg, #0f172a 0%, #1e293b 60%, #0c1525 100%);">
 
         {{-- Engrenages en fond --}}
@@ -38,7 +41,7 @@ $cog = 'M495.9 166.6c3.2 8.7.5 18.4-6.4 24.6l-43.3 39.4c1.1 8.3 1.7 16.8 1.7 25.
         </div>
 
         {{-- Contenu centré --}}
-        <div class="relative z-10 flex flex-col items-center text-center px-16 max-w-2xl">
+        <div class="relative z-10 flex flex-col items-center text-center px-16 max-w-2xl my-auto">
 
             {{-- Logo --}}
             <div class="mb-8" style="padding:12px;background:rgba(255,255,255,.06);border-radius:24px;border:1px solid rgba(249,115,22,.25);">
@@ -86,8 +89,8 @@ $cog = 'M495.9 166.6c3.2 8.7.5 18.4-6.4 24.6l-43.3 39.4c1.1 8.3 1.7 16.8 1.7 25.
 
         </div>
 
-        {{-- Footer --}}
-        <p class="absolute bottom-6 text-slate-600 text-sm">
+        {{-- Footer — en flux normal (plus en absolute) pour ne jamais recouvrir le contenu --}}
+        <p class="relative z-10 flex-shrink-0 mt-8 text-slate-500 text-sm text-center">
             © {{ date('Y') }} STCD Motors — Tous droits réservés
         </p>
     </div>

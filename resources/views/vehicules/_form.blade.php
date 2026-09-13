@@ -54,10 +54,13 @@
                        class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-orange-500 @error('immatriculation') border-red-400 @enderror">
             </div>
             <div>
-                <label class="block text-sm font-medium text-slate-700 mb-1.5">N° Châssis (VIN)</label>
-                <input type="text" name="vin" value="{{ old('vin', $vehicule?->vin) }}"
+                <label class="block text-sm font-medium text-slate-700 mb-1.5">N° Châssis (VIN) <span class="text-red-500">*</span></label>
+                <input type="text" name="vin" value="{{ old('vin', $vehicule?->vin) }}" required
+                       minlength="17" maxlength="17" pattern="[A-Za-z0-9]{17}"
+                       title="Le VIN doit contenir exactement 17 caractères alphanumériques (lettres et chiffres)."
                        placeholder="VF7XXXXXXXXXXXXXXX" style="text-transform:uppercase"
-                       class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-orange-500">
+                       class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-orange-500 @error('vin') border-red-400 @enderror">
+                <p class="text-xs text-slate-400 mt-1">Exactement 17 caractères alphanumériques (ni plus, ni moins).</p>
             </div>
         </div>
     </div>
@@ -132,9 +135,10 @@
                        class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 @error('kilometrage') border-red-400 @enderror">
             </div>
             <div>
-                <label class="block text-sm font-medium text-slate-700 mb-1.5">Date de mise en circulation</label>
+                <label class="block text-sm font-medium text-slate-700 mb-1.5">Date de mise en circulation <span class="text-red-500">*</span></label>
                 <input type="date" name="date_mise_circulation" value="{{ old('date_mise_circulation', $vehicule?->date_mise_circulation?->format('Y-m-d')) }}"
-                       class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
+                       required max="{{ date('Y-m-d') }}"
+                       class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 @error('date_mise_circulation') border-red-400 @enderror">
             </div>
         </div>
     </div>

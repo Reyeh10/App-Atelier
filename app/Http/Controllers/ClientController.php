@@ -4,294 +4,1422 @@ namespace App\Http\Controllers;
 
 use App\Models\Activite;
 use App\Models\Client;
+use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\Rule;
+use Illuminate\View\View;
 
-/**
- * Contrôleur des Clients.
- *
- * Gère trois types de clients :
- *   - Particulier : nom + prénom
- *   - Société     : raison sociale, peut avoir un compte crédit avec plafond
- *   - Assurance   : identique à société, traitement comptable différent
- *
- * La création/modification des comptes société et assurance est réservée à l'admin.
- * Les comptes crédit (paiement différé) sont également gérés par l'admin uniquement.
- */
 class ClientController extends Controller
 {
-    /**
-     * Liste tous les clients avec compteurs de véhicules et d'OR.
-     * Permet de filtrer par type (particulier, société, assurance) et de rechercher
-     * par nom, prénom, raison sociale, téléphone ou email.
-     */
-    public function index(Request $request)
+    /*
+    |--------------------------------------------------------------------------
+    | INDEX
+    |--------------------------------------------------------------------------
+    |
+    | Liste des clients.
+    |
+    | Recherche :
+    | - nom
+    | - prénom
+    | - raison sociale
+    | - téléphone
+    | - email
+    |
+    | Filtre :
+    | - particulier
+    | - societe
+    | - assurance
+    |
+    */
+    public function index(Request $request): View
     {
-        $query = Client::withCount(['vehicules', 'ordresReparations'])
-            ->orderBy('nom');
+        $query = Client::query()
+            ->withCount([
+                'vehicules',
+                'ordresReparations',
+            ])
+            ->orderBy('nom')
+            ->orderBy('prenom');
 
-        // Recherche multi-champs (nom, prénom, raison sociale, téléphone, email)
-        if ($search = $request->get('q')) {
+        /*
+        |--------------------------------------------------------------------------
+        | RECHERCHE
+        |--------------------------------------------------------------------------
+        */
+        if ($request->filled('q')) {
+            $search = trim(
+                (string) $request->input('q')
+            );
+
             $query->where(function ($q) use ($search) {
-                $q->where('nom', 'like', "%{$search}%")
-                  ->orWhere('prenom', 'like', "%{$search}%")
-                  ->orWhere('raison_sociale', 'like', "%{$search}%")
-                  ->orWhere('telephone', 'like', "%{$search}%")
-                  ->orWhere('email', 'like', "%{$search}%");
+                $q
+                    ->where(
+                        'nom',
+                        'like',
+                        '%' . $search . '%'
+                    )
+                    ->orWhere(
+                        'prenom',
+                        'like',
+                        '%' . $search . '%'
+                    )
+                    ->orWhere(
+                        'raison_sociale',
+                        'like',
+                        '%' . $search . '%'
+                    )
+                    ->orWhere(
+                        'telephone',
+                        'like',
+                        '%' . $search . '%'
+                    )
+                    ->orWhere(
+                        'telephone2',
+                        'like',
+                        '%' . $search . '%'
+                    )
+                    ->orWhere(
+                        'email',
+                        'like',
+                        '%' . $search . '%'
+                    );
             });
         }
 
-        // Filtre par type de client
-        if ($type = $request->get('type')) {
-            $query->where('type', $type);
+        /*
+        |--------------------------------------------------------------------------
+        | FILTRE TYPE
+        |--------------------------------------------------------------------------
+        */
+        if ($request->filled('type')) {
+            $type = (string) $request->input('type');
+
+            if (
+                in_array(
+                    $type,
+                    [
+                        'particulier',
+                        'societe',
+                        'assurance',
+                    ],
+                    true
+                )
+            ) {
+                $query->where(
+                    'type',
+                    $type
+                );
+            }
         }
 
-        $clients = $query->paginate(20)->withQueryString();
+        /*
+        |--------------------------------------------------------------------------
+        | PAGINATION
+        |--------------------------------------------------------------------------
+        */
+        $clients = $query
+            ->paginate(20)
+            ->withQueryString();
 
-        return view('clients.index', compact('clients'));
+        return view(
+            'clients.index',
+            compact('clients')
+        );
     }
 
-    /**
-     * Affiche le formulaire de création d'un client.
-     * Réservé aux utilisateurs avec la permission 'gerer_clients'.
-     */
-    public function create()
+    /*
+    |--------------------------------------------------------------------------
+    | CREATE
+    |--------------------------------------------------------------------------
+    */
+    public function create(): View
     {
-        if (! auth()->user()->hasPermission('gerer_clients') &&
-            ! auth()->user()->hasPermission('gerer_clients_societe') &&
-            ! auth()->user()->hasPermission('gerer_clients_assurance')) abort(403);
+        $this->requireAuthenticatedUser();
 
-        $typesAutorises = $this->typesAutorises();
-        return view('clients.create', compact('typesAutorises'));
+        /*
+        |--------------------------------------------------------------------------
+        | AU MOINS UNE PERMISSION CLIENT
+        |--------------------------------------------------------------------------
+        */
+        if (
+            !$this->hasPermission('gerer_clients')
+            && !$this->hasPermission('gerer_clients_societe')
+            && !$this->hasPermission('gerer_clients_assurance')
+        ) {
+            abort(
+                403,
+                'Vous n\'êtes pas autorisé à créer des clients.'
+            );
+        }
+
+        $typesAutorises =
+            $this->typesAutorises();
+
+        return view(
+            'clients.create',
+            compact('typesAutorises')
+        );
     }
 
+    /*
+    |--------------------------------------------------------------------------
+    | STORE
+    |--------------------------------------------------------------------------
+    */
+    public function store(
+        Request $request
+    ): RedirectResponse {
+        $this->requireAuthenticatedUser();
+
+        $type = (string) $request->input(
+            'type',
+            'particulier'
+        );
+
+        /*
+        |--------------------------------------------------------------------------
+        | TYPE VALIDE AVANT CONTRÔLE PERMISSION
+        |--------------------------------------------------------------------------
+        */
+        if (
+            !in_array(
+                $type,
+                [
+                    'particulier',
+                    'societe',
+                    'assurance',
+                ],
+                true
+            )
+        ) {
+            return back()
+                ->withInput()
+                ->withErrors([
+                    'type' =>
+                        'Le type de client sélectionné est invalide.',
+                ]);
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | PERMISSION DU TYPE
+        |--------------------------------------------------------------------------
+        */
+        if (
+            !$this->hasPermission(
+                $this->permissionPourType($type)
+            )
+        ) {
+            abort(
+                403,
+                'Vous n\'êtes pas autorisé à créer un client de ce type.'
+            );
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | SOCIÉTÉ / ASSURANCE
+        |--------------------------------------------------------------------------
+        |
+        | Ces deux types utilisent une raison sociale.
+        |
+        */
+        $typeEntreprise =
+            in_array(
+                $type,
+                [
+                    'societe',
+                    'assurance',
+                ],
+                true
+            );
+
+        /*
+        |--------------------------------------------------------------------------
+        | VALIDATION
+        |--------------------------------------------------------------------------
+        */
+        $data = $request->validate(
+            [
+                'type' => [
+                    'required',
+                    Rule::in([
+                        'particulier',
+                        'societe',
+                        'assurance',
+                    ]),
+                ],
+
+                'nom' => [
+                    Rule::requiredIf(
+                        !$typeEntreprise
+                    ),
+                    'nullable',
+                    'string',
+                    'max:100',
+                ],
+
+                'prenom' => [
+                    'nullable',
+                    'string',
+                    'max:100',
+                ],
+
+                'raison_sociale' => [
+                    Rule::requiredIf(
+                        $typeEntreprise
+                    ),
+                    'nullable',
+                    'string',
+                    'max:200',
+                ],
+
+                'rc' => [
+                    'nullable',
+                    'string',
+                    'max:50',
+                ],
+
+                'nif' => [
+                    'nullable',
+                    'string',
+                    'max:50',
+                ],
+
+                'contact_nom' => [
+                    'nullable',
+                    'string',
+                    'max:100',
+                ],
+
+                'telephone' => [
+                    'required',
+                    'string',
+                    'max:20',
+                ],
+
+                'telephone2' => [
+                    'nullable',
+                    'string',
+                    'max:20',
+                ],
+
+                'email' => [
+                    'nullable',
+                    'email',
+                    'max:150',
+                ],
+
+                'adresse' => [
+                    'nullable',
+                    'string',
+                ],
+
+                'ville' => [
+                    'nullable',
+                    'string',
+                    'max:100',
+                ],
+
+                'wilaya' => [
+                    'nullable',
+                    'string',
+                    'max:100',
+                ],
+
+                'notes' => [
+                    'nullable',
+                    'string',
+                ],
+
+                /*
+                |--------------------------------------------------------------------------
+                | COMPTE CRÉDIT
+                |--------------------------------------------------------------------------
+                */
+                'compte_actif' => [
+                    'nullable',
+                    'boolean',
+                ],
+
+                'plafond_compte' => [
+                    'nullable',
+                    'numeric',
+                    'min:0',
+                ],
+            ],
+            $this->validationMessages()
+        );
+
+        /*
+        |--------------------------------------------------------------------------
+        | NOM SOCIÉTÉ / ASSURANCE
+        |--------------------------------------------------------------------------
+        |
+        | Pour faciliter les recherches et l'affichage,
+        | nom contient également la raison sociale.
+        |
+        */
+        if ($typeEntreprise) {
+            $data['nom'] =
+                trim(
+                    (string) $data['raison_sociale']
+                );
+
+            $data['prenom'] = null;
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | COMPTE CRÉDIT
+        |--------------------------------------------------------------------------
+        |
+        | Seuls les utilisateurs disposant de gerer_compte_credit
+        | peuvent activer/modifier ces informations.
+        |
+        */
+        if (
+            $this->hasPermission(
+                'gerer_compte_credit'
+            )
+        ) {
+            $data['compte_actif'] =
+                $request->boolean(
+                    'compte_actif'
+                );
+
+            $data['plafond_compte'] =
+                $request->filled(
+                    'plafond_compte'
+                )
+                    ? (float) $request->input(
+                        'plafond_compte'
+                    )
+                    : null;
+        } else {
+            $data['compte_actif'] =
+                false;
+
+            $data['plafond_compte'] =
+                null;
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | CRÉATION
+        |--------------------------------------------------------------------------
+        */
+        $client =
+            Client::create($data);
+
+        /*
+        |--------------------------------------------------------------------------
+        | JOURNAL ACTIVITÉ
+        |--------------------------------------------------------------------------
+        */
+        Activite::journaliser(
+            'creer_client',
+            'Création client '
+                . $client->type
+                . ' : '
+                . $client->nom_complet,
+            $client
+        );
+
+        return redirect()
+            ->route(
+                'clients.show',
+                $client
+            )
+            ->with(
+                'success',
+                'Client « '
+                    . $client->nom_complet
+                    . ' » créé avec succès.'
+            );
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | SHOW
+    |--------------------------------------------------------------------------
+    */
+    public function show(
+        Client $client
+    ): View {
+        $client->load([
+            'vehicules',
+
+            'ordresReparations' =>
+                function ($query) {
+                    $query
+                        ->with('vehicule')
+                        ->latest()
+                        ->limit(10);
+                },
+        ]);
+
+        return view(
+            'clients.show',
+            compact('client')
+        );
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | EDIT
+    |--------------------------------------------------------------------------
+    */
+    public function edit(
+        Client $client
+    ): View {
+        $this->requireAuthenticatedUser();
+
+        /*
+        |--------------------------------------------------------------------------
+        | PERMISSION SUR LE TYPE ACTUEL
+        |--------------------------------------------------------------------------
+        */
+        if (
+            !$this->hasPermission(
+                $this->permissionPourType(
+                    $client->type
+                )
+            )
+        ) {
+            abort(
+                403,
+                'Vous n\'êtes pas autorisé à modifier ce client.'
+            );
+        }
+
+        $typesAutorises =
+            $this->typesAutorises();
+
+        return view(
+            'clients.edit',
+            compact(
+                'client',
+                'typesAutorises'
+            )
+        );
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | UPDATE
+    |--------------------------------------------------------------------------
+    */
+    public function update(
+        Request $request,
+        Client $client
+    ): RedirectResponse {
+        $this->requireAuthenticatedUser();
+
+        $type = (string) $request->input(
+            'type',
+            $client->type
+        );
+
+        /*
+        |--------------------------------------------------------------------------
+        | TYPE VALIDE
+        |--------------------------------------------------------------------------
+        */
+        if (
+            !in_array(
+                $type,
+                [
+                    'particulier',
+                    'societe',
+                    'assurance',
+                ],
+                true
+            )
+        ) {
+            return back()
+                ->withInput()
+                ->withErrors([
+                    'type' =>
+                        'Le type de client sélectionné est invalide.',
+                ]);
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | PERMISSION SUR LE CLIENT ACTUEL
+        |--------------------------------------------------------------------------
+        |
+        | Empêche un utilisateur sans permission sur le type actuel
+        | de contourner la sécurité en changeant simplement le type.
+        |
+        */
+        if (
+            !$this->hasPermission(
+                $this->permissionPourType(
+                    $client->type
+                )
+            )
+        ) {
+            abort(
+                403,
+                'Vous n\'êtes pas autorisé à modifier ce client.'
+            );
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | PERMISSION SUR LE NOUVEAU TYPE
+        |--------------------------------------------------------------------------
+        */
+        if (
+            !$this->hasPermission(
+                $this->permissionPourType(
+                    $type
+                )
+            )
+        ) {
+            abort(
+                403,
+                'Vous n\'êtes pas autorisé à attribuer ce type au client.'
+            );
+        }
+
+        $typeEntreprise =
+            in_array(
+                $type,
+                [
+                    'societe',
+                    'assurance',
+                ],
+                true
+            );
+
+        /*
+        |--------------------------------------------------------------------------
+        | VALIDATION
+        |--------------------------------------------------------------------------
+        */
+        $data = $request->validate(
+            [
+                'type' => [
+                    'required',
+                    Rule::in([
+                        'particulier',
+                        'societe',
+                        'assurance',
+                    ]),
+                ],
+
+                'nom' => [
+                    Rule::requiredIf(
+                        !$typeEntreprise
+                    ),
+                    'nullable',
+                    'string',
+                    'max:100',
+                ],
+
+                'prenom' => [
+                    'nullable',
+                    'string',
+                    'max:100',
+                ],
+
+                'raison_sociale' => [
+                    Rule::requiredIf(
+                        $typeEntreprise
+                    ),
+                    'nullable',
+                    'string',
+                    'max:200',
+                ],
+
+                'rc' => [
+                    'nullable',
+                    'string',
+                    'max:50',
+                ],
+
+                'nif' => [
+                    'nullable',
+                    'string',
+                    'max:50',
+                ],
+
+                'contact_nom' => [
+                    'nullable',
+                    'string',
+                    'max:100',
+                ],
+
+                'telephone' => [
+                    'required',
+                    'string',
+                    'max:20',
+                ],
+
+                'telephone2' => [
+                    'nullable',
+                    'string',
+                    'max:20',
+                ],
+
+                'email' => [
+                    'nullable',
+                    'email',
+                    'max:150',
+                ],
+
+                'adresse' => [
+                    'nullable',
+                    'string',
+                ],
+
+                'ville' => [
+                    'nullable',
+                    'string',
+                    'max:100',
+                ],
+
+                'wilaya' => [
+                    'nullable',
+                    'string',
+                    'max:100',
+                ],
+
+                'notes' => [
+                    'nullable',
+                    'string',
+                ],
+
+                'compte_actif' => [
+                    'nullable',
+                    'boolean',
+                ],
+
+                'plafond_compte' => [
+                    'nullable',
+                    'numeric',
+                    'min:0',
+                ],
+            ],
+            $this->validationMessages()
+        );
+
+        /*
+        |--------------------------------------------------------------------------
+        | SOCIÉTÉ / ASSURANCE
+        |--------------------------------------------------------------------------
+        */
+        if ($typeEntreprise) {
+            $data['nom'] =
+                trim(
+                    (string) $data['raison_sociale']
+                );
+
+            $data['prenom'] =
+                null;
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | PARTICULIER
+        |--------------------------------------------------------------------------
+        |
+        | Nettoyer les champs entreprise si on transforme une société/
+        | assurance en particulier.
+        |
+        */
+        if (!$typeEntreprise) {
+            $data['raison_sociale'] =
+                null;
+
+            $data['rc'] =
+                null;
+
+            $data['nif'] =
+                null;
+
+            $data['contact_nom'] =
+                null;
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | COMPTE CRÉDIT
+        |--------------------------------------------------------------------------
+        */
+        if (
+            $this->hasPermission(
+                'gerer_compte_credit'
+            )
+        ) {
+            $data['compte_actif'] =
+                $request->boolean(
+                    'compte_actif'
+                );
+
+            $data['plafond_compte'] =
+                $request->filled(
+                    'plafond_compte'
+                )
+                    ? (float) $request->input(
+                        'plafond_compte'
+                    )
+                    : null;
+        } else {
+            /*
+            |--------------------------------------------------------------------------
+            | IMPORTANT
+            |--------------------------------------------------------------------------
+            |
+            | Si l'utilisateur n'a pas la permission crédit,
+            | on retire ces champs du tableau pour conserver les valeurs
+            | existantes du client.
+            |
+            */
+            unset(
+                $data['compte_actif'],
+                $data['plafond_compte']
+            );
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | MISE À JOUR
+        |--------------------------------------------------------------------------
+        */
+        $client->update($data);
+
+        /*
+        |--------------------------------------------------------------------------
+        | JOURNAL ACTIVITÉ
+        |--------------------------------------------------------------------------
+        */
+        Activite::journaliser(
+            'modifier_client',
+            'Modification client : '
+                . $client->nom_complet,
+            $client
+        );
+
+        return redirect()
+            ->route(
+                'clients.show',
+                $client
+            )
+            ->with(
+                'success',
+                'Client mis à jour avec succès.'
+            );
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | STORE RAPIDE
+    |--------------------------------------------------------------------------
+    |
+    | Création AJAX d'un client depuis un autre formulaire,
+    | par exemple la création d'un ordre de réparation.
+    |
+    */
+    public function storeRapide(
+        Request $request
+    ): JsonResponse {
+        $this->requireAuthenticatedUser();
+
+        $type = (string) $request->input(
+            'type',
+            'particulier'
+        );
+
+        /*
+        |--------------------------------------------------------------------------
+        | TYPE VALIDE
+        |--------------------------------------------------------------------------
+        */
+        if (
+            !in_array(
+                $type,
+                [
+                    'particulier',
+                    'societe',
+                    'assurance',
+                ],
+                true
+            )
+        ) {
+            return response()->json(
+                [
+                    'message' =>
+                        'Le type de client sélectionné est invalide.',
+                ],
+                422
+            );
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | PERMISSION
+        |--------------------------------------------------------------------------
+        */
+        if (
+            !$this->hasPermission(
+                $this->permissionPourType(
+                    $type
+                )
+            )
+        ) {
+            return response()->json(
+                [
+                    'message' =>
+                        'Vous n\'êtes pas autorisé à créer un client de ce type.',
+                ],
+                403
+            );
+        }
+
+        $typeEntreprise =
+            in_array(
+                $type,
+                [
+                    'societe',
+                    'assurance',
+                ],
+                true
+            );
+
+        /*
+        |--------------------------------------------------------------------------
+        | VALIDATION
+        |--------------------------------------------------------------------------
+        */
+        $data = $request->validate(
+            [
+                'type' => [
+                    'required',
+                    Rule::in([
+                        'particulier',
+                        'societe',
+                        'assurance',
+                    ]),
+                ],
+
+                'nom' => [
+                    Rule::requiredIf(
+                        !$typeEntreprise
+                    ),
+                    'nullable',
+                    'string',
+                    'max:100',
+                ],
+
+                'prenom' => [
+                    'nullable',
+                    'string',
+                    'max:100',
+                ],
+
+                'raison_sociale' => [
+                    Rule::requiredIf(
+                        $typeEntreprise
+                    ),
+                    'nullable',
+                    'string',
+                    'max:200',
+                ],
+
+                'telephone' => [
+                    'required',
+                    'string',
+                    'max:20',
+                ],
+
+                'telephone2' => [
+                    'nullable',
+                    'string',
+                    'max:20',
+                ],
+
+                'email' => [
+                    'nullable',
+                    'email',
+                    'max:150',
+                ],
+
+                'adresse' => [
+                    'nullable',
+                    'string',
+                    'max:255',
+                ],
+            ],
+            [
+                'type.required' =>
+                    'Veuillez sélectionner le type de client.',
+
+                'type.in' =>
+                    'Le type de client sélectionné est invalide.',
+
+                'nom.required' =>
+                    'Le nom du client est obligatoire.',
+
+                'nom.max' =>
+                    'Le nom ne doit pas dépasser 100 caractères.',
+
+                'raison_sociale.required' =>
+                    'La raison sociale est obligatoire pour une société ou une assurance.',
+
+                'raison_sociale.max' =>
+                    'La raison sociale ne doit pas dépasser 200 caractères.',
+
+                'telephone.required' =>
+                    'Le numéro de téléphone est obligatoire.',
+
+                'telephone.max' =>
+                    'Le numéro de téléphone ne doit pas dépasser 20 caractères.',
+
+                'email.email' =>
+                    'L\'adresse e-mail saisie n\'est pas valide.',
+            ]
+        );
+
+        /*
+        |--------------------------------------------------------------------------
+        | ENTREPRISE
+        |--------------------------------------------------------------------------
+        */
+        if ($typeEntreprise) {
+            $data['nom'] =
+                trim(
+                    (string) $data['raison_sociale']
+                );
+
+            $data['prenom'] =
+                null;
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | SÉCURITÉ COMPTE CRÉDIT
+        |--------------------------------------------------------------------------
+        |
+        | La création rapide ne doit jamais activer implicitement
+        | un compte crédit.
+        |
+        */
+        $data['compte_actif'] =
+            false;
+
+        $data['plafond_compte'] =
+            null;
+
+        /*
+        |--------------------------------------------------------------------------
+        | CRÉATION
+        |--------------------------------------------------------------------------
+        */
+        $client =
+            Client::create($data);
+
+        /*
+        |--------------------------------------------------------------------------
+        | JOURNAL
+        |--------------------------------------------------------------------------
+        */
+        Activite::journaliser(
+            'creer_client',
+            'Création rapide client '
+                . $client->type
+                . ' : '
+                . $client->nom_complet,
+            $client
+        );
+
+        /*
+        |--------------------------------------------------------------------------
+        | JSON
+        |--------------------------------------------------------------------------
+        */
+        return response()->json([
+            'id' =>
+                $client->id,
+
+            'nom_complet' =>
+                $client->nom_complet,
+
+            'telephone' =>
+                $client->telephone ?? '',
+
+            'adresse' =>
+                $client->adresse ?? '',
+
+            'type' =>
+                $client->getTypeLabel(),
+        ]);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | DESTROY
+    |--------------------------------------------------------------------------
+    */
+    public function destroy(
+        Client $client
+    ): RedirectResponse {
+        $this->requireAuthenticatedUser();
+
+        /*
+        |--------------------------------------------------------------------------
+        | ADMIN UNIQUEMENT
+        |--------------------------------------------------------------------------
+        */
+        if (!$this->isAdmin()) {
+            abort(
+                403,
+                'La suppression de clients est réservée à l\'administrateur.'
+            );
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | VÉHICULES
+        |--------------------------------------------------------------------------
+        */
+        if (
+            $client
+                ->vehicules()
+                ->exists()
+        ) {
+            return back()
+                ->with(
+                    'error',
+                    'Impossible de supprimer : ce client a des véhicules enregistrés.'
+                );
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | ORDRES DE RÉPARATION
+        |--------------------------------------------------------------------------
+        */
+        if (
+            $client
+                ->ordresReparations()
+                ->exists()
+        ) {
+            return back()
+                ->with(
+                    'error',
+                    'Impossible de supprimer : ce client possède un historique d\'ordres de réparation.'
+                );
+        }
+
+        $nom =
+            $client->nom_complet;
+
+        /*
+        |--------------------------------------------------------------------------
+        | JOURNAL AVANT SUPPRESSION
+        |--------------------------------------------------------------------------
+        */
+        Activite::journaliser(
+            'supprimer_client',
+            'Suppression client : '
+                . $nom
+        );
+
+        /*
+        |--------------------------------------------------------------------------
+        | SUPPRESSION
+        |--------------------------------------------------------------------------
+        */
+        $client->delete();
+
+        return redirect()
+            ->route(
+                'clients.index'
+            )
+            ->with(
+                'success',
+                'Client « '
+                    . $nom
+                    . ' » supprimé.'
+            );
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | TYPES AUTORISÉS
+    |--------------------------------------------------------------------------
+    */
     private function typesAutorises(): array
     {
-        $u = auth()->user();
         $types = [];
-        if ($u->hasPermission('gerer_clients'))           $types[] = 'particulier';
-        if ($u->hasPermission('gerer_clients_societe'))   $types[] = 'societe';
-        if ($u->hasPermission('gerer_clients_assurance')) $types[] = 'assurance';
+
+        if (
+            $this->hasPermission(
+                'gerer_clients'
+            )
+        ) {
+            $types[] =
+                'particulier';
+        }
+
+        if (
+            $this->hasPermission(
+                'gerer_clients_societe'
+            )
+        ) {
+            $types[] =
+                'societe';
+        }
+
+        if (
+            $this->hasPermission(
+                'gerer_clients_assurance'
+            )
+        ) {
+            $types[] =
+                'assurance';
+        }
+
         return $types;
     }
 
-    private function permissionPourType(string $type): string
-    {
-        return match($type) {
-            'societe'   => 'gerer_clients_societe',
-            'assurance' => 'gerer_clients_assurance',
-            default     => 'gerer_clients',
+    /*
+    |--------------------------------------------------------------------------
+    | PERMISSION PAR TYPE
+    |--------------------------------------------------------------------------
+    */
+    private function permissionPourType(
+        string $type
+    ): string {
+        return match ($type) {
+            'societe' =>
+                'gerer_clients_societe',
+
+            'assurance' =>
+                'gerer_clients_assurance',
+
+            default =>
+                'gerer_clients',
         };
     }
 
-    /**
-     * Enregistre un nouveau client.
-     * Réservé aux utilisateurs avec la permission 'gerer_clients'.
-     * Règles spéciales :
-     *   - Pour les sociétés, le champ "nom" est rempli avec la raison sociale
-     *   - La création d'un compte société/assurance est réservée à l'admin
-     *   - Le compte crédit et le plafond sont réservés à l'admin
-     */
-    public function store(Request $request)
+    /*
+    |--------------------------------------------------------------------------
+    | UTILISATEUR CONNECTÉ
+    |--------------------------------------------------------------------------
+    |
+    | Utiliser Auth::user() ici évite de répéter auth()->user()
+    | partout dans le contrôleur.
+    |
+    */
+    private function currentUser(): ?Authenticatable
     {
-        $type = $request->input('type', 'particulier');
-        if (! auth()->user()->hasPermission($this->permissionPourType($type))) {
-            abort(403, 'Vous n\'êtes pas autorisé à créer un client de ce type.');
-        }
-
-        $typeSociete = $type === 'societe';
-
-        $data = $request->validate([
-            'type'          => ['required', 'in:particulier,societe,assurance'],
-            'nom'           => [Rule::requiredIf(! $typeSociete), 'nullable', 'string', 'max:100'],
-            'prenom'        => ['nullable', 'string', 'max:100'],
-            'raison_sociale'=> [Rule::requiredIf($typeSociete), 'nullable', 'string', 'max:200'],
-            'rc'            => ['nullable', 'string', 'max:50'],
-            'nif'           => ['nullable', 'string', 'max:50'],
-            'contact_nom'   => ['nullable', 'string', 'max:100'],
-            'telephone'     => ['required', 'string', 'max:20'],
-            'telephone2'    => ['nullable', 'string', 'max:20'],
-            'email'         => ['nullable', 'email', 'max:150'],
-            'adresse'       => ['nullable', 'string'],
-            'ville'         => ['nullable', 'string', 'max:100'],
-            'wilaya'        => ['nullable', 'string', 'max:100'],
-            'notes'         => ['nullable', 'string'],
-        ], [
-            'type.required'           => 'Veuillez sélectionner le type de client (particulier, société ou assurance).',
-            'type.in'                 => 'Le type de client sélectionné est invalide.',
-            'nom.required'            => 'Le nom du client est obligatoire.',
-            'nom.max'                 => 'Le nom ne doit pas dépasser 100 caractères.',
-            'raison_sociale.required' => 'La raison sociale est obligatoire pour un client de type société.',
-            'raison_sociale.max'      => 'La raison sociale ne doit pas dépasser 200 caractères.',
-            'telephone.required'      => 'Le numéro de téléphone est obligatoire.',
-            'telephone.max'           => 'Le numéro de téléphone ne doit pas dépasser 20 caractères.',
-            'email.email'             => 'L\'adresse e-mail saisie n\'est pas valide.',
-        ]);
-
-        if ($typeSociete) {
-            $data['nom'] = $data['raison_sociale'];
-        }
-
-        // Le compte crédit et son plafond sont réservés aux utilisateurs avec gerer_compte_credit
-        $peutCredit = auth()->user()->hasPermission('gerer_compte_credit');
-        $data['compte_actif']   = $peutCredit ? (bool) $request->boolean('compte_actif') : false;
-        $data['plafond_compte'] = $peutCredit && $request->filled('plafond_compte') ? $request->plafond_compte : null;
-
-        $client = Client::create($data);
-        Activite::journaliser('creer_client', "Création client {$client->type} : {$client->nom_complet}", $client);
-
-        return redirect()->route('clients.show', $client)
-            ->with('success', "Client « {$client->nom_complet} » créé avec succès.");
+        return Auth::user();
     }
 
-    /**
-     * Affiche la fiche détaillée d'un client avec ses véhicules
-     * et ses 10 derniers ordres de réparation.
-     */
-    public function show(Client $client)
+    /*
+    |--------------------------------------------------------------------------
+    | EXIGER AUTHENTIFICATION
+    |--------------------------------------------------------------------------
+    */
+    private function requireAuthenticatedUser(): Authenticatable
     {
-        $client->load([
-            'vehicules',
-            'ordresReparations' => fn($q) => $q->with('vehicule')->latest()->limit(10),
-        ]);
+        $user =
+            $this->currentUser();
 
-        return view('clients.show', compact('client'));
+        if (!$user) {
+            abort(
+                401,
+                'Vous devez être connecté.'
+            );
+        }
+
+        return $user;
     }
 
-    /**
-     * Affiche le formulaire de modification d'un client.
-     * La modification des comptes société/assurance est réservée à l'admin.
-     */
-    public function edit(Client $client)
-    {
-        if (! auth()->user()->hasPermission($this->permissionPourType($client->type))) abort(403);
+    /*
+    |--------------------------------------------------------------------------
+    | VÉRIFIER UNE PERMISSION
+    |--------------------------------------------------------------------------
+    |
+    | IMPORTANT :
+    |
+    | On utilise is_callable + call_user_func afin qu'Intelephense
+    | ne signale plus :
+    |
+    | Undefined method 'hasPermission'
+    |
+    | tout en conservant votre méthode hasPermission() personnalisée
+    | sur le modèle utilisateur.
+    |
+    */
+    private function hasPermission(
+        string $permission
+    ): bool {
+        $user =
+            $this->currentUser();
 
-        $typesAutorises = $this->typesAutorises();
-        return view('clients.edit', compact('client', 'typesAutorises'));
+        if (!$user) {
+            return false;
+        }
+
+        if (
+            !is_callable([
+                $user,
+                'hasPermission',
+            ])
+        ) {
+            return false;
+        }
+
+        return (bool) call_user_func(
+            [
+                $user,
+                'hasPermission',
+            ],
+            $permission
+        );
     }
 
-    /**
-     * Enregistre les modifications d'un client existant.
-     * Même règles de permission que pour la création.
-     */
-    public function update(Request $request, Client $client)
+    /*
+    |--------------------------------------------------------------------------
+    | ADMIN
+    |--------------------------------------------------------------------------
+    |
+    | Compatible avec votre méthode personnalisée isAdmin().
+    |
+    */
+    private function isAdmin(): bool
     {
-        $type = $request->input('type', $client->type);
-        if (! auth()->user()->hasPermission($this->permissionPourType($type))) abort(403);
+        $user =
+            $this->currentUser();
 
-        $typeSociete = $type === 'societe';
-
-        $data = $request->validate([
-            'type'          => ['required', 'in:particulier,societe,assurance'],
-            'nom'           => [Rule::requiredIf(! $typeSociete), 'nullable', 'string', 'max:100'],
-            'prenom'        => ['nullable', 'string', 'max:100'],
-            'raison_sociale'=> [Rule::requiredIf($typeSociete), 'nullable', 'string', 'max:200'],
-            'rc'            => ['nullable', 'string', 'max:50'],
-            'nif'           => ['nullable', 'string', 'max:50'],
-            'contact_nom'   => ['nullable', 'string', 'max:100'],
-            'telephone'     => ['required', 'string', 'max:20'],
-            'telephone2'    => ['nullable', 'string', 'max:20'],
-            'email'         => ['nullable', 'email', 'max:150'],
-            'adresse'       => ['nullable', 'string'],
-            'ville'         => ['nullable', 'string', 'max:100'],
-            'wilaya'        => ['nullable', 'string', 'max:100'],
-            'notes'         => ['nullable', 'string'],
-        ], [
-            'type.required'           => 'Veuillez sélectionner le type de client (particulier, société ou assurance).',
-            'type.in'                 => 'Le type de client sélectionné est invalide.',
-            'nom.required'            => 'Le nom du client est obligatoire.',
-            'nom.max'                 => 'Le nom ne doit pas dépasser 100 caractères.',
-            'raison_sociale.required' => 'La raison sociale est obligatoire pour un client de type société.',
-            'raison_sociale.max'      => 'La raison sociale ne doit pas dépasser 200 caractères.',
-            'telephone.required'      => 'Le numéro de téléphone est obligatoire.',
-            'telephone.max'           => 'Le numéro de téléphone ne doit pas dépasser 20 caractères.',
-            'email.email'             => 'L\'adresse e-mail saisie n\'est pas valide.',
-        ]);
-
-        if ($typeSociete) {
-            $data['nom'] = $data['raison_sociale'];
+        if (!$user) {
+            return false;
         }
 
-        // Modification du compte crédit réservée aux utilisateurs avec gerer_compte_credit
-        if (auth()->user()->hasPermission('gerer_compte_credit')) {
-            $data['compte_actif']   = $request->boolean('compte_actif');
-            $data['plafond_compte'] = $request->filled('plafond_compte') ? $request->plafond_compte : null;
+        /*
+        |--------------------------------------------------------------------------
+        | MÉTHODE isAdmin()
+        |--------------------------------------------------------------------------
+        */
+        if (
+            is_callable([
+                $user,
+                'isAdmin',
+            ])
+        ) {
+            return (bool) call_user_func([
+                $user,
+                'isAdmin',
+            ]);
         }
 
-        $client->update($data);
-        Activite::journaliser('modifier_client', "Modification client : {$client->nom_complet}", $client);
+        /*
+        |--------------------------------------------------------------------------
+        | FALLBACK ROLE
+        |--------------------------------------------------------------------------
+        |
+        | Permet aussi de fonctionner si le modèle dispose simplement
+        | d'un attribut role = admin.
+        |
+        */
+        if (
+            isset($user->role)
+            && $user->role === 'admin'
+        ) {
+            return true;
+        }
 
-        return redirect()->route('clients.show', $client)
-            ->with('success', 'Client mis à jour avec succès.');
+        return false;
     }
 
-    /**
-     * Crée un client rapidement depuis le formulaire de création d'OR (en modal/AJAX).
-     * Retourne les données du client créé au format JSON pour que le formulaire se mette à jour.
-     * La création de comptes société/assurance reste réservée à l'admin.
-     */
-    public function storeRapide(Request $request)
+    /*
+    |--------------------------------------------------------------------------
+    | MESSAGES DE VALIDATION
+    |--------------------------------------------------------------------------
+    */
+    private function validationMessages(): array
     {
-        if (! auth()->user()->hasPermission('gerer_clients')) abort(403);
+        return [
+            'type.required' =>
+                'Veuillez sélectionner le type de client (particulier, société ou assurance).',
 
-        $typeSociete = $request->type === 'societe';
+            'type.in' =>
+                'Le type de client sélectionné est invalide.',
 
-        $data = $request->validate([
-            'type'           => ['required', 'in:particulier,societe,assurance'],
-            'nom'            => [Rule::requiredIf(! $typeSociete), 'nullable', 'string', 'max:100'],
-            'prenom'         => ['nullable', 'string', 'max:100'],
-            'raison_sociale' => [Rule::requiredIf($typeSociete), 'nullable', 'string', 'max:200'],
-            'telephone'      => ['required', 'string', 'max:20'],
-            'email'          => ['nullable', 'email', 'max:150'],
-            'adresse'        => ['nullable', 'string', 'max:255'],
-        ], [
-            'type.required'           => 'Veuillez sélectionner le type de client.',
-            'type.in'                 => 'Le type de client sélectionné est invalide.',
-            'nom.required'            => 'Le nom du client est obligatoire.',
-            'raison_sociale.required' => 'La raison sociale est obligatoire pour un client de type société.',
-            'telephone.required'      => 'Le numéro de téléphone est obligatoire.',
-            'email.email'             => 'L\'adresse e-mail saisie n\'est pas valide.',
-        ]);
+            'nom.required' =>
+                'Le nom du client est obligatoire.',
 
-        if (in_array($request->type, ['societe', 'assurance']) && ! auth()->user()->peutGererClientSociete()) {
-            return response()->json(['message' => 'La création d\'un client Société ou Assurance est réservée à l\'administrateur. Contactez votre administrateur.'], 403);
-        }
+            'nom.string' =>
+                'Le nom du client doit être du texte.',
 
-        if ($typeSociete) {
-            $data['nom'] = $data['raison_sociale'];
-        }
+            'nom.max' =>
+                'Le nom ne doit pas dépasser 100 caractères.',
 
-        $client = Client::create($data);
-        Activite::journaliser('creer_client', "Création rapide client {$client->type} : {$client->nom_complet}", $client);
+            'prenom.string' =>
+                'Le prénom doit être du texte.',
 
-        // Retour JSON pour mise à jour immédiate du formulaire sans rechargement de page
-        return response()->json([
-            'id'         => $client->id,
-            'nom_complet'=> $client->nom_complet,
-            'telephone'  => $client->telephone ?? '',
-            'adresse'    => $client->adresse ?? '',
-            'type'       => $client->getTypeLabel(),
-        ]);
-    }
+            'prenom.max' =>
+                'Le prénom ne doit pas dépasser 100 caractères.',
 
-    /**
-     * Supprime définitivement un client (admin uniquement).
-     * La suppression est refusée si le client a des véhicules enregistrés
-     * pour éviter de laisser des données orphelines en base.
-     */
-    public function destroy(Client $client)
-    {
-        if (! auth()->user()->isAdmin()) abort(403, 'La suppression de clients est réservée à l\'administrateur.');
+            'raison_sociale.required' =>
+                'La raison sociale est obligatoire pour une société ou une assurance.',
 
-        if ($client->vehicules()->exists()) {
-            return back()->with('error', 'Impossible de supprimer : ce client a des véhicules enregistrés.');
-        }
+            'raison_sociale.string' =>
+                'La raison sociale doit être du texte.',
 
-        $nom = $client->nom_complet;
-        Activite::journaliser('supprimer_client', "Suppression client : {$nom}");
-        $client->delete();
+            'raison_sociale.max' =>
+                'La raison sociale ne doit pas dépasser 200 caractères.',
 
-        return redirect()->route('clients.index')
-            ->with('success', "Client « {$nom} » supprimé.");
+            'rc.max' =>
+                'Le registre de commerce ne doit pas dépasser 50 caractères.',
+
+            'nif.max' =>
+                'Le NIF ne doit pas dépasser 50 caractères.',
+
+            'contact_nom.max' =>
+                'Le nom du contact ne doit pas dépasser 100 caractères.',
+
+            'telephone.required' =>
+                'Le numéro de téléphone est obligatoire.',
+
+            'telephone.string' =>
+                'Le numéro de téléphone est invalide.',
+
+            'telephone.max' =>
+                'Le numéro de téléphone ne doit pas dépasser 20 caractères.',
+
+            'telephone2.max' =>
+                'Le deuxième numéro de téléphone ne doit pas dépasser 20 caractères.',
+
+            'email.email' =>
+                'L\'adresse e-mail saisie n\'est pas valide.',
+
+            'email.max' =>
+                'L\'adresse e-mail ne doit pas dépasser 150 caractères.',
+
+            'ville.max' =>
+                'La ville ne doit pas dépasser 100 caractères.',
+
+            'wilaya.max' =>
+                'La wilaya ne doit pas dépasser 100 caractères.',
+
+            'compte_actif.boolean' =>
+                'La valeur du compte crédit est invalide.',
+
+            'plafond_compte.numeric' =>
+                'Le plafond du compte doit être un nombre.',
+
+            'plafond_compte.min' =>
+                'Le plafond du compte ne peut pas être négatif.',
+        ];
     }
 }

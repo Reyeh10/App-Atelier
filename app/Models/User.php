@@ -36,6 +36,7 @@ class User extends Authenticatable
         'email',
         'password',
         'role',
+        'locale',
     ];
 
     // Les champs sensibles ne sont jamais exposés dans les réponses JSON

@@ -58,7 +58,7 @@
     <div class="px-6 py-4 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
         <div>
             <h3 class="text-sm font-bold text-slate-700 uppercase tracking-wider">Détail des prestations</h3>
-            <p class="text-xs text-slate-400 mt-0.5">Main d'œuvre → nombre d'heures &nbsp;|&nbsp; Pièce → quantité + référence</p>
+            <p class="text-xs text-slate-400 mt-0.5">Main d'œuvre → nombre d'heures &nbsp;|&nbsp; Pièce → quantité + référence &nbsp;|&nbsp; le prix des pièces est fourni automatiquement par le magasin</p>
         </div>
         <div class="flex gap-2">
             <button type="button" onclick="ajouterLigne('main_oeuvre')"
@@ -295,7 +295,8 @@ function ajouterLigne(type) {
         </td>
         <td class="px-3 py-3">
             <input type="number" name="lignes[${i}][prix_unitaire]" value="0" min="0" step="0.01"
-                   class="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-right focus:outline-none focus:ring-1 focus:ring-orange-500 ligne-pu"
+                   ${isPiece ? 'readonly title="Prix fourni automatiquement par le magasin"' : ''}
+                   class="w-full border rounded-lg px-2 py-1.5 text-xs text-right ligne-pu ${isPiece ? 'border-gray-100 bg-gray-50 text-slate-400 cursor-not-allowed' : 'border-gray-300 focus:outline-none focus:ring-1 focus:ring-orange-500'}"
                    oninput="calculerLigne(this)">
         </td>
         <td class="px-3 py-3">
@@ -320,6 +321,7 @@ function typeChanged(select) {
     const row       = select.closest('tr');
     const refInput  = row.querySelector('.ligne-ref');
     const qtyInput  = row.querySelector('.ligne-qty');
+    const puInput   = row.querySelector('.ligne-pu');
     const uniteSpan = row.querySelector('.ligne-unite');
     const type      = select.value;
 
@@ -330,6 +332,12 @@ function typeChanged(select) {
         qtyInput.placeholder = 'Qté';
         uniteSpan.textContent  = 'u';
         uniteSpan.className    = 'ligne-unite text-xs font-bold text-orange-500 w-4 text-center';
+        // Le prix des pièces vient du magasin : champ verrouillé, remis à 0.
+        puInput.readOnly     = true;
+        puInput.title        = 'Prix fourni automatiquement par le magasin';
+        puInput.value        = 0;
+        puInput.className     = 'w-full border border-gray-100 bg-gray-50 rounded-lg px-2 py-1.5 text-xs text-right text-slate-400 cursor-not-allowed ligne-pu';
+        calculerLigne(puInput);
     } else {
         refInput.disabled    = true;
         refInput.value       = '';
@@ -338,6 +346,9 @@ function typeChanged(select) {
         qtyInput.placeholder = 'Heures';
         uniteSpan.textContent  = 'h';
         uniteSpan.className    = 'ligne-unite text-xs font-bold text-blue-500 w-4 text-center';
+        puInput.readOnly     = false;
+        puInput.title        = '';
+        puInput.className     = 'w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-right focus:outline-none focus:ring-1 focus:ring-orange-500 ligne-pu';
     }
 
     const designationInput = row.querySelector('.ligne-designation');
