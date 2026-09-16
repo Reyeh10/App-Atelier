@@ -512,6 +512,7 @@ $nomsJours = [
         </div>
         @endif
     </div>
+    </div>
 
     {{-- ══════════════════════════════════════════════════════
          ONGLET 4 — GARANTIE CONSTRUCTEUR

@@ -1,6 +1,6 @@
 <?php
 
-use App\Http\Controllers\Api\FournisseurBonCommandeController;
+use App\Http\Controllers\Api\FournisseurReponseController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -25,15 +25,18 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
 
 /*
 |--------------------------------------------------------------------------
-| Bons de commande
+| Bons de commande — réponse du fournisseur (stcd-magasin)
 |--------------------------------------------------------------------------
 |
-| Reçoit les bons de commande envoyés en temps réel par l'application
-| externe.
+| stcd-magasin renvoie ici la disponibilité, le prix et une éventuelle note
+| pour chaque ligne d'un bon de commande, dès qu'un vendeur l'a identifiée
+| manuellement (cf. App\Services\FournisseurApiService côté envoi et
+| App\Http\Middleware\VerifyFournisseurToken pour l'authentification par
+| jeton secret partagé, indépendante des comptes utilisateurs).
 |
 */
 
-Route::middleware('auth:sanctum')->post(
-    '/bons-commande',
-    [FournisseurBonCommandeController::class, 'store']
-)->name('api.bons-commande.store');
+Route::middleware('fournisseur.token')->patch(
+    '/bons-commande/{numero}/lignes/{index}',
+    [FournisseurReponseController::class, 'updateLigne']
+)->name('api.bons-commande.lignes.update');

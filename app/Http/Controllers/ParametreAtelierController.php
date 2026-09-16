@@ -77,6 +77,7 @@ class ParametreAtelierController extends Controller
     {
         $data = $request->validate([
             'jours'                    => ['required', 'array'],
+            'jours.*.actif'            => ['nullable'],
             'jours.*.heure_debut'      => ['nullable', 'date_format:H:i'],
             'jours.*.heure_fin'        => ['nullable', 'date_format:H:i'],
         ], [

@@ -31,9 +31,10 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
-    'app_atelier' => [
-        'url'   => env('APP_ATELIER_URL'),
-        'token' => env('APP_ATELIER_TOKEN'),
+    'stcd_magasin' => [
+        'url'           => env('STCD_MAGASIN_URL'),
+        'token'         => env('STCD_MAGASIN_TOKEN'),
+        'inbound_token' => env('STCD_MAGASIN_INBOUND_TOKEN'),
     ],
 
 ];
