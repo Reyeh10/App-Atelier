@@ -17,7 +17,8 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * Quand un devis est accepté, un bon de commande pièces est généré automatiquement
  * (si le devis contient des pièces détachées).
  *
- * Format du numéro : DV-AAAA-XXXX (ex: DV-2026-0001).
+ * Format du numéro : N°/GARA/AAAA (ex: 1/GARA/2026) — même format que la
+ * facture (cf. Facture::genererNumero()), sur demande explicite.
  */
 class Devis extends Model
 {
@@ -102,15 +103,24 @@ class Devis extends Model
     }
 
     /**
-     * Génère un numéro de devis séquentiel au format DV-AAAA-XXXX.
-     * La séquence repart à 1 chaque année.
+     * Génère un numéro de devis séquentiel au format N°/GARA/AAAA (ex:
+     * 1/GARA/2026) — même format que la facture. La séquence repart à 1
+     * chaque année. Le numéro le plus élevé de l'année est déterminé en PHP
+     * (et non via MAX() SQL) car un tri alphabétique sur "N/GARA/AAAA" serait
+     * faux dès que le nombre de chiffres de N change (ex: "10/..." < "9/..."
+     * en tri texte).
      */
     public static function genererNumero(): string
     {
-        $annee   = now()->year;
-        $dernier = self::whereYear('created_at', $annee)->max('numero');
-        $seq     = $dernier ? (int) substr($dernier, -4) + 1 : 1;
-        return sprintf('DV-%d-%04d', $annee, $seq);
+        $annee      = now()->year;
+        $dernierSeq = self::whereYear('created_at', $annee)
+            ->get(['numero'])
+            ->map(fn ($d) => (int) explode('/', $d->numero)[0])
+            ->max();
+
+        $seq = ($dernierSeq ?? 0) + 1;
+
+        return sprintf('%d/GARA/%d', $seq, $annee);
     }
 
     // ── Labels et couleurs ─────────────────────────────────────────────

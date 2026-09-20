@@ -38,17 +38,10 @@
 
 {{-- Options --}}
 <div class="bg-white rounded-2xl border border-gray-200 p-6">
-    <div class="grid grid-cols-3 gap-4">
-        <div>
-            <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Taux TVA (%)</label>
-            <input type="number" name="taux_tva" value="{{ $devis->taux_tva }}" min="0" max="100" step="0.01"
-                   class="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
-        </div>
-        <div class="col-span-2">
-            <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Notes / Conditions</label>
-            <input type="text" name="notes" value="{{ $devis->notes }}" placeholder="Validité du devis, remarques..."
-                   class="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
-        </div>
+    <div>
+        <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Notes / Conditions</label>
+        <input type="text" name="notes" value="{{ $devis->notes }}" placeholder="Validité du devis, remarques..."
+               class="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
     </div>
 </div>
 
@@ -150,14 +143,8 @@
     <div class="border-t border-gray-200 px-6 py-4 bg-gray-50">
         <div class="flex justify-end">
             <div class="space-y-2 min-w-64">
-                <div class="flex justify-between text-sm">
-                    <span class="text-slate-500">Total HT</span>
-                    <span class="font-semibold text-slate-800" id="total-ht">0,00 FDJ</span>
-                </div>
-                <div class="flex justify-between text-sm">
-                    <span class="text-slate-500">TVA (<span id="taux-tva-display">{{ $devis->taux_tva }}</span>%)</span>
-                    <span class="font-semibold text-slate-800" id="total-tva">0,00 FDJ</span>
-                </div>
+                <div class="flex justify-between text-sm"><span class="text-slate-500">Total HT</span><span class="font-semibold" id="total-ht">0,00 FDJ</span></div>
+                <div class="flex justify-between text-sm"><span class="text-slate-500">TVA (10%)</span><span class="font-semibold" id="total-tva">0,00 FDJ</span></div>
                 <div class="flex justify-between text-base font-bold border-t border-gray-300 pt-2">
                     <span class="text-slate-800">Total TTC</span>
                     <span class="text-orange-500" id="total-ttc">0,00 FDJ</span>
@@ -388,19 +375,17 @@ function calculerLigne(input) {
 function recalculerTotaux() {
     let ht = 0;
     document.querySelectorAll('.ligne-total-input').forEach(i => { ht += parseFloat(i.value) || 0; });
-    const tva        = parseFloat(document.querySelector('[name="taux_tva"]').value) || 10;
-    const montantTva = ht * tva / 100;
+    // Taux fixe imposé par la direction — non modifiable par le formulaire.
+    const tva = ht * 0.10;
     document.getElementById('total-ht').textContent  = formatFDJ(ht) + ' FDJ';
-    document.getElementById('total-tva').textContent = formatFDJ(montantTva) + ' FDJ';
-    document.getElementById('total-ttc').textContent = formatFDJ(ht + montantTva) + ' FDJ';
-    document.getElementById('taux-tva-display').textContent = tva;
+    document.getElementById('total-tva').textContent = formatFDJ(tva) + ' FDJ';
+    document.getElementById('total-ttc').textContent = formatFDJ(ht + tva) + ' FDJ';
 }
 
 function formatFDJ(n) {
     return n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ' ').replace('.', ',');
 }
 
-document.querySelector('[name="taux_tva"]').addEventListener('input', recalculerTotaux);
 recalculerTotaux();
 </script>
 @endsection

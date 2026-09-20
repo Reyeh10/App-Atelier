@@ -217,11 +217,16 @@ class VehiculeController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Normalisation du VIN
+        | Normalisation immatriculation / VIN
         |--------------------------------------------------------------------------
         */
 
         $request->merge([
+            'immatriculation' => strtoupper(
+                trim(
+                    (string) $request->input('immatriculation')
+                )
+            ),
             'vin' => strtoupper(
                 trim(
                     (string) $request->input('vin')
@@ -485,11 +490,16 @@ class VehiculeController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Normalisation du VIN
+        | Normalisation immatriculation / VIN
         |--------------------------------------------------------------------------
         */
 
         $request->merge([
+            'immatriculation' => strtoupper(
+                trim(
+                    (string) $request->input('immatriculation')
+                )
+            ),
             'vin' => strtoupper(
                 trim(
                     (string) $request->input('vin')
@@ -800,11 +810,16 @@ class VehiculeController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Normalisation VIN
+        | Normalisation immatriculation / VIN
         |--------------------------------------------------------------------------
         */
 
         $request->merge([
+            'immatriculation' => strtoupper(
+                trim(
+                    (string) $request->input('immatriculation')
+                )
+            ),
             'vin' => strtoupper(
                 trim(
                     (string) $request->input('vin')

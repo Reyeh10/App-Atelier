@@ -14,8 +14,12 @@ use App\Models\Technicien;
 use App\Models\TypeMoteur;
 use App\Models\User;
 use App\Models\Vehicule;
+use App\Services\EntretienService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * Contrôleur des Ordres de Réparation (OR).
@@ -25,8 +29,6 @@ use Illuminate\Support\Facades\DB;
  */
 class OrdreReparationController extends Controller
 {
-    // Marge (en km) en dessous d'un palier d'entretien pour le considérer atteint
-    private const ENTRETIEN_MARGE_PROCHE = 100;
     // Au-delà de cette marge de dépassement (en km), on signale un entretien en retard
     private const ENTRETIEN_MARGE_DEPASSEMENT = 500;
 
@@ -115,7 +117,12 @@ class OrdreReparationController extends Controller
      */
     public function store(Request $request)
     {
-        if (! auth()->user()->hasPermission('creer_ordres')) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (!$user || !$user->hasPermission('creer_ordres')) {
+            abort(403);
+        }
 
         $data = $request->validate([
             'client_id'              => ['required', 'exists:clients,id'],
@@ -178,7 +185,7 @@ class OrdreReparationController extends Controller
 
         // Numéro automatique, conseiller = utilisateur connecté, statut initial = ouvert
         $data['numero']               = OrdreReparation::genererNumero();
-        $data['conseiller_id']        = auth()->id();
+        $data['conseiller_id']        = Auth::id();
         $data['statut']               = 'ouvert';
         $data['accessoires_presents'] = $request->boolean('accessoires_presents');
         $data['signature_client']     = $request->boolean('signature_client');
@@ -197,7 +204,7 @@ class OrdreReparationController extends Controller
         $entretienPalier = null;
         if ($data['type'] === 'entretien' && $typeMoteurId) {
             $vehicule = Vehicule::find($data['vehicule_id']);
-            $entretienPalier = $this->resoudrePalierEntretien($vehicule, $data['kilometrage_entree'], $typeMoteurId);
+            $entretienPalier = EntretienService::resoudrePalier($vehicule, $data['kilometrage_entree'], $typeMoteurId);
             $data['entretien_km_seuil'] = $entretienPalier;
         }
 
@@ -292,7 +299,7 @@ class OrdreReparationController extends Controller
         // Sécurité : on refuse si la photo n'appartient pas à cet OR
         if ($photo->or_id !== $ordresReparation->id) abort(403);
 
-        \Storage::disk('public')->delete($photo->chemin);
+        Storage::disk('public')->delete($photo->chemin);
         $photo->delete();
 
         return back()->with('success', 'Photo supprimée.');
@@ -306,7 +313,10 @@ class OrdreReparationController extends Controller
      */
     public function demarrerTravaux(OrdreReparation $ordresReparation)
     {
-        if (! auth()->user()->hasPermission('gerer_ordres')) {
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (!$user || !$user->hasPermission('gerer_ordres')) {
             abort(403);
         }
 
@@ -328,7 +338,10 @@ class OrdreReparationController extends Controller
      */
     public function terminerTravaux(Request $request, OrdreReparation $ordresReparation)
     {
-        if (! auth()->user()->hasPermission('gerer_ordres')) {
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (!$user || !$user->hasPermission('gerer_ordres')) {
             abort(403);
         }
 
@@ -359,7 +372,12 @@ class OrdreReparationController extends Controller
      */
     public function validerQualite(OrdreReparation $ordresReparation)
     {
-        if (! auth()->user()->hasPermission('valider_qualite')) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (!$user || !$user->hasPermission('valider_qualite')) {
+            abort(403);
+        }
 
         $ordresReparation->update(['statut' => 'lavage']);
         return back()->with('success', 'Contrôle qualité validé — véhicule en lavage.');
@@ -371,7 +389,12 @@ class OrdreReparationController extends Controller
      */
     public function terminerLavage(OrdreReparation $ordresReparation)
     {
-        if (! auth()->user()->hasPermission('valider_lavage')) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (!$user || !$user->hasPermission('valider_lavage')) {
+            abort(403);
+        }
 
         $ordresReparation->update(['statut' => 'pret']);
 
@@ -392,7 +415,12 @@ class OrdreReparationController extends Controller
      */
     public function changerStatut(Request $request, OrdreReparation $ordresReparation)
     {
-        if (! auth()->user()->hasPermission('gerer_ordres')) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (!$user || !$user->hasPermission('gerer_ordres')) {
+            abort(403);
+        }
 
         // Tant que l'OR est de type garantie, il appartient exclusivement à
         // l'équipe garantie — le chef de garage ne peut pas en changer le
@@ -430,7 +458,12 @@ class OrdreReparationController extends Controller
      */
     public function affecter(Request $request, OrdreReparation $ordresReparation)
     {
-        if (! auth()->user()->hasPermission('affecter_technicien')) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (!$user || !$user->hasPermission('affecter_technicien')) {
+            abort(403);
+        }
 
         // Bloquer si un BC pièces existe et n'est pas encore entièrement reçu
         $bcEnAttente = $ordresReparation->bonsCommande()
@@ -458,7 +491,7 @@ class OrdreReparationController extends Controller
         $ordresReparation->update([
             'technicien_id'    => $request->technicien_id,
             'service'          => $request->service,
-            'chef_id'          => auth()->id(),  // L'utilisateur qui affecte devient le chef responsable
+            'chef_id'          => Auth::id(),  // L'utilisateur qui affecte devient le chef responsable
             'date_affectation' => now(),
             'duree_estimee'    => $request->duree_estimee ? (float) $request->duree_estimee : null,
             'statut'           => 'devis_accepte',
@@ -475,7 +508,12 @@ class OrdreReparationController extends Controller
      */
     public function uploadFicheSignee(Request $request, OrdreReparation $ordresReparation)
     {
-        if (! auth()->user()->hasPermission('creer_dossiers')) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (!$user || !$user->hasPermission('creer_dossiers')) {
+            abort(403);
+        }
 
         $request->validate([
             'fiche_signee' => ['required', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:10240'],
@@ -488,7 +526,7 @@ class OrdreReparationController extends Controller
 
         // Suppression de l'ancienne fiche signée si elle existait déjà
         if ($ordresReparation->fiche_signee) {
-            \Storage::disk('public')->delete($ordresReparation->fiche_signee);
+            Storage::disk('public')->delete($ordresReparation->fiche_signee);
         }
 
         $path = $request->file('fiche_signee')->store('fiches-signees', 'public');
@@ -504,7 +542,12 @@ class OrdreReparationController extends Controller
      */
     public function uploadFicheSigneeRestitution(Request $request, OrdreReparation $ordresReparation)
     {
-        if (! auth()->user()->hasPermission('restituer_vehicule')) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (!$user || !$user->hasPermission('restituer_vehicule')) {
+            abort(403);
+        }
 
         $request->validate([
             'fiche_signee_restitution' => ['required', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:10240'],
@@ -516,7 +559,7 @@ class OrdreReparationController extends Controller
         ]);
 
         if ($ordresReparation->fiche_signee_restitution) {
-            \Storage::disk('public')->delete($ordresReparation->fiche_signee_restitution);
+            Storage::disk('public')->delete($ordresReparation->fiche_signee_restitution);
         }
 
         $path = $request->file('fiche_signee_restitution')->store('fiches-signees-restitution', 'public');
@@ -554,7 +597,12 @@ class OrdreReparationController extends Controller
      */
     public function restitution(OrdreReparation $ordresReparation)
     {
-        if (! auth()->user()->hasPermission('restituer_vehicule')) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (!$user || !$user->hasPermission('restituer_vehicule')) {
+            abort(403);
+        }
         $ordresReparation->load(['client', 'vehicule', 'conseiller', 'technicien', 'photosOr']);
         return view('ordres-reparations.restitution', ['or' => $ordresReparation]);
     }
@@ -567,7 +615,12 @@ class OrdreReparationController extends Controller
      */
     public function restituer(Request $request, OrdreReparation $ordresReparation)
     {
-        if (! auth()->user()->hasPermission('restituer_vehicule')) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (!$user || !$user->hasPermission('restituer_vehicule')) {
+            abort(403);
+        }
 
         $request->validate([
             'kilometrage_sortie'     => ['required', 'integer', 'min:0'],
@@ -603,7 +656,7 @@ class OrdreReparationController extends Controller
             'notes_restitution'       => $request->notes_restitution,
             'signature_restitution'   => $request->boolean('signature_restitution'),
             'date_sortie_reelle'      => $request->date_sortie_reelle,
-            'restitue_par_id'         => auth()->id(),  // Qui a effectué la restitution
+            'restitue_par_id'         => Auth::id(),  // Qui a effectué la restitution
             'statut'                  => 'livre',       // L'OR est clôturé
         ]);
 
@@ -634,7 +687,12 @@ class OrdreReparationController extends Controller
      */
     public function imprimerRestitution(OrdreReparation $ordresReparation)
     {
-        if (! auth()->user()->hasPermission('restituer_vehicule')) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (!$user || !$user->hasPermission('restituer_vehicule')) {
+            abort(403);
+        }
 
         $ordresReparation->load(['client', 'vehicule', 'conseiller', 'restitueePar']);
         return view('ordres-reparations.print-restitution', ['or' => $ordresReparation]);
@@ -649,7 +707,12 @@ class OrdreReparationController extends Controller
      */
     public function changerStatutGarantie(Request $request, OrdreReparation $ordresReparation)
     {
-        if (! auth()->user()->hasPermission('traiter_garanties')) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (!$user || !$user->hasPermission('traiter_garanties')) {
+            abort(403);
+        }
 
         $request->validate([
             'statut_garantie'            => ['required', 'in:approuve,refuse'],
@@ -698,50 +761,6 @@ class OrdreReparationController extends Controller
         );
 
         return back()->with('success', 'Décision garantie enregistrée.');
-    }
-
-    /**
-     * Résout le palier kilométrique du barème constructeur à appliquer pour
-     * un entretien périodique.
-     *
-     * Priorité au dernier entretien réellement effectué sur ce véhicule (on
-     * avance simplement au palier suivant du barème) plutôt qu'un recalcul
-     * brut depuis le kilométrage — beaucoup de clients reviennent bien après
-     * l'échéance théorique. Marge de tolérance : ±100 km autour du palier
-     * visé est considéré atteint ; au-delà de +500 km de dépassement, on
-     * applique quand même ce palier mais on le signale (voir show.blade.php).
-     */
-    private function resoudrePalierEntretien(Vehicule $vehicule, int $kmActuel, int $typeMoteurId): ?int
-    {
-        // "Huile moteur" est présente à chaque vraie colonne du tableau constructeur
-        // (et nulle part ailleurs) — on s'en sert comme référence de la grille des
-        // paliers, pour ne pas la confondre avec les seuils informatifs isolés
-        // (ex: huile de boîte à 50 000 km, courroie de distribution à 80 000 km...).
-        $paliers = EntretienTache::where('type_moteur_id', $typeMoteurId)
-            ->where('designation', 'Huile moteur')
-            ->orderBy('km_seuil')
-            ->pluck('km_seuil')
-            ->all();
-
-        if (empty($paliers)) return null;
-
-        $dernierEntretien = OrdreReparation::where('vehicule_id', $vehicule->id)
-            ->where('type', 'entretien')
-            ->whereNotNull('entretien_km_seuil')
-            ->latest('date_entree')
-            ->first();
-
-        if ($dernierEntretien) {
-            // On avance d'un cran dans le barème par rapport au dernier entretien fait
-            $suivants = array_values(array_filter($paliers, fn ($p) => $p > $dernierEntretien->entretien_km_seuil));
-            $palierVise = $suivants[0] ?? end($paliers);
-        } else {
-            // Pas d'historique : le plus grand palier déjà atteint (≤ km actuel), sinon le premier palier du barème
-            $atteints = array_values(array_filter($paliers, fn ($p) => $p <= $kmActuel + self::ENTRETIEN_MARGE_PROCHE));
-            $palierVise = empty($atteints) ? $paliers[0] : end($atteints);
-        }
-
-        return $palierVise;
     }
 
     /**

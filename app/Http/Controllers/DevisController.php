@@ -8,6 +8,7 @@ use App\Models\DossierReception;
 use App\Models\LigneDevis;
 use App\Models\OrdreReparation;
 use App\Models\User;
+use App\Services\ArrondiFdjService;
 use App\Services\DevisWorkflowService;
 use App\Services\OperationsMaintenanceService;
 use Illuminate\Http\RedirectResponse;
@@ -220,8 +221,9 @@ class DevisController extends Controller
                     'or_id' =>
                         $ordresReparation->id,
 
+                    // Taux fixe imposé par la direction — non modifiable par le formulaire.
                     'taux_tva' =>
-                        $request->input('taux_tva'),
+                        10,
 
                     'notes' =>
                         $request->input('notes'),
@@ -334,8 +336,9 @@ class DevisController extends Controller
                     'dossier_id' =>
                         $dossier->id,
 
+                    // Taux fixe imposé par la direction — non modifiable par le formulaire.
                     'taux_tva' =>
-                        $request->input('taux_tva'),
+                        10,
 
                     'notes' =>
                         $request->input('notes'),
@@ -504,8 +507,9 @@ class DevisController extends Controller
                 */
 
                 $devis->update([
+                    // Taux fixe imposé par la direction — non modifiable par le formulaire.
                     'taux_tva' =>
-                        $request->input('taux_tva'),
+                        10,
 
                     'notes' =>
                         $request->input('notes'),
@@ -1075,13 +1079,6 @@ class DevisController extends Controller
 
         $request->validate(
             [
-                'taux_tva' => [
-                    'required',
-                    'numeric',
-                    'min:0',
-                    'max:100',
-                ],
-
                 'notes' => [
                     'nullable',
                     'string',
@@ -1129,18 +1126,6 @@ class DevisController extends Controller
                 ],
             ],
             [
-                'taux_tva.required' =>
-                    'Le taux de TVA est obligatoire.',
-
-                'taux_tva.numeric' =>
-                    'Le taux de TVA doit être un nombre.',
-
-                'taux_tva.min' =>
-                    'Le taux de TVA ne peut pas être négatif.',
-
-                'taux_tva.max' =>
-                    'Le taux de TVA ne peut pas dépasser 100%.',
-
                 'lignes.required' =>
                     'Le devis doit contenir au moins une ligne.',
 
@@ -1194,88 +1179,43 @@ class DevisController extends Controller
 
     /**
      * Crée toutes les lignes d'un devis.
+     *
+     * Avant création, ajuste le prix unitaire de la ligne la plus chère pour
+     * que le total TTC du devis soit un multiple de 5 FDJ (pas de coupure de
+     * 1 ni 2 en circulation) — le client voit ainsi déjà, sur le devis, le
+     * même montant qui lui sera demandé plus tard sur la facture.
      */
     private function creerLignesDevis(
         Devis $devis,
         array $lignes
     ): void {
-        foreach ($lignes as $ligne) {
-            /*
-            |--------------------------------------------------------------------------
-            | Valeurs
-            |--------------------------------------------------------------------------
-            */
+        $lignesCalc = array_map(function ($ligne) {
+            $quantite     = (float) ($ligne['quantite'] ?? 0);
+            $prixUnitaire = (float) ($ligne['prix_unitaire'] ?? 0);
+            $remise       = (float) ($ligne['remise'] ?? 0);
 
-            $quantite =
-                (float) ($ligne['quantite'] ?? 0);
+            return array_merge($ligne, [
+                'quantite'      => $quantite,
+                'prix_unitaire' => $prixUnitaire,
+                'remise'        => $remise,
+                'total_ht'      => round($quantite * $prixUnitaire * (1 - $remise / 100), 2),
+            ]);
+        }, $lignes);
 
-            $prixUnitaire =
-                (float) ($ligne['prix_unitaire'] ?? 0);
+        ArrondiFdjService::arrondir($lignesCalc, (float) $devis->taux_tva);
 
-            $remise =
-                (float) ($ligne['remise'] ?? 0);
-
-            /*
-            |--------------------------------------------------------------------------
-            | Total HT
-            |--------------------------------------------------------------------------
-            */
-
-            $totalHt = round(
-                $quantite
-                * $prixUnitaire
-                * (1 - ($remise / 100)),
-                2
-            );
-
-            /*
-            |--------------------------------------------------------------------------
-            | Référence
-            |--------------------------------------------------------------------------
-            */
-
-            $reference = null;
-
-            if (
-                ($ligne['type'] ?? null)
-                ===
-                'piece'
-            ) {
-                $reference =
-                    $ligne['reference']
-                    ?? null;
-            }
-
-            /*
-            |--------------------------------------------------------------------------
-            | Création
-            |--------------------------------------------------------------------------
-            */
+        foreach ($lignesCalc as $ligne) {
+            $reference = ($ligne['type'] ?? null) === 'piece' ? ($ligne['reference'] ?? null) : null;
 
             LigneDevis::create([
-                'devis_id' =>
-                    $devis->id,
-
-                'type' =>
-                    $ligne['type'],
-
-                'designation' =>
-                    $ligne['designation'],
-
-                'reference' =>
-                    $reference,
-
-                'quantite' =>
-                    $quantite,
-
-                'prix_unitaire' =>
-                    $prixUnitaire,
-
-                'remise' =>
-                    $remise,
-
-                'total_ht' =>
-                    $totalHt,
+                'devis_id'      => $devis->id,
+                'type'          => $ligne['type'],
+                'designation'   => $ligne['designation'],
+                'reference'     => $reference,
+                'quantite'      => $ligne['quantite'],
+                'prix_unitaire' => $ligne['prix_unitaire'],
+                'remise'        => $ligne['remise'],
+                'total_ht'      => $ligne['total_ht'],
             ]);
         }
     }

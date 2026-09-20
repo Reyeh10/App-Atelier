@@ -216,14 +216,8 @@
     {{-- Totaux --}}
     <div class="border-t border-gray-200 px-6 py-4 bg-gray-50 flex justify-end">
         <div class="space-y-2 min-w-64">
-            <div class="flex justify-between text-sm">
-                <span class="text-slate-500">Total HT</span>
-                <span class="font-semibold">{{ number_format($devis->montant_ht, 0, ',', ' ') }} FDJ</span>
-            </div>
-            <div class="flex justify-between text-sm">
-                <span class="text-slate-500">TVA ({{ $devis->taux_tva }}%)</span>
-                <span class="font-semibold">{{ number_format($devis->montant_tva, 0, ',', ' ') }} FDJ</span>
-            </div>
+            <div class="flex justify-between text-sm"><span class="text-slate-500">Total HT</span><span class="font-semibold">{{ number_format($devis->montant_ht, 0, ',', ' ') }} FDJ</span></div>
+            <div class="flex justify-between text-sm"><span class="text-slate-500">TVA ({{ (int) $devis->taux_tva }}%)</span><span class="font-semibold">{{ number_format($devis->montant_tva, 0, ',', ' ') }} FDJ</span></div>
             <div class="flex justify-between text-base font-bold border-t border-gray-300 pt-2">
                 <span class="text-slate-800">Total TTC</span>
                 <span class="text-orange-500 text-lg">{{ number_format($devis->montant_ttc, 0, ',', ' ') }} FDJ</span>

@@ -10,8 +10,13 @@ use App\Models\EntretienTache;
 use App\Models\LigneDevis;
 use App\Models\Reservation;
 use App\Models\Vehicule;
+use App\Services\EntretienService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+
+use App\Models\User;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * Contrôleur des Dossiers de Réception.
@@ -27,16 +32,18 @@ use Illuminate\Support\Facades\DB;
  */
 class DossierReceptionController extends Controller
 {
-    // Marge (en km) en dessous d'un palier d'entretien pour le considérer atteint
-    private const ENTRETIEN_MARGE_PROCHE = 100;
-
     /**
      * Liste les dossiers de réception, du plus récent au plus ancien.
      * Filtre optionnel par statut (ex: en_attente_client pour la file de relance).
      */
     public function index(Request $request)
     {
-        if (! auth()->user()->hasPermission('voir_dossiers')) abort(403);
+       /** @var User|null $user */
+        $user = Auth::user();
+
+        if (!$user || !$user->hasPermission('voir_dossiers')) {
+            abort(403);
+        }
 
         $query = DossierReception::with(['client', 'vehicule', 'conseiller'])
             ->orderByDesc('date_entree')
@@ -57,7 +64,12 @@ class DossierReceptionController extends Controller
      */
     public function create(Request $request)
     {
-        if (! auth()->user()->hasPermission('creer_dossiers')) abort(403);
+       /** @var User|null $user */
+        $user = Auth::user();
+
+        if (!$user || !$user->hasPermission('voir_dossiers')) {
+            abort(403);
+        }
 
         $motifVisite   = $request->get('motif_visite');
         $typePanne     = $request->get('type_panne');
@@ -105,7 +117,12 @@ class DossierReceptionController extends Controller
      */
     public function store(Request $request)
     {
-        if (! auth()->user()->hasPermission('creer_dossiers')) abort(403);
+       /** @var User|null $user */
+        $user = Auth::user();
+
+        if (!$user || !$user->hasPermission('voir_dossiers')) {
+            abort(403);
+        }
 
         $data = $request->validate([
             'client_id'              => ['required', 'exists:clients,id'],
@@ -176,7 +193,7 @@ class DossierReceptionController extends Controller
         }
 
         $data['numero']               = DossierReception::genererNumero();
-        $data['conseiller_id']        = auth()->id();
+       $data['conseiller_id'] = Auth::id();
         $data['statut']               = 'nouveau';
         $data['accessoires_presents'] = $request->boolean('accessoires_presents');
         $data['signature_client']     = $request->boolean('signature_client');
@@ -187,7 +204,7 @@ class DossierReceptionController extends Controller
         $entretienPalier = null;
         if ($data['motif_visite'] === 'service_rapide' && $data['canal_service'] === 'entretien_periodique' && $typeMoteurId) {
             $vehicule = Vehicule::find($data['vehicule_id']);
-            $entretienPalier = $this->resoudrePalierEntretien($vehicule, $data['kilometrage_entree'], $typeMoteurId);
+            $entretienPalier = EntretienService::resoudrePalier($vehicule, $data['kilometrage_entree'], $typeMoteurId);
             $data['entretien_km_seuil'] = $entretienPalier;
         }
 
@@ -235,7 +252,12 @@ class DossierReceptionController extends Controller
      */
     public function show(DossierReception $dossier)
     {
-        if (! auth()->user()->hasPermission('voir_dossiers')) abort(403);
+       /** @var User|null $user */
+        $user = Auth::user();
+
+        if (!$user || !$user->hasPermission('voir_dossiers')) {
+            abort(403);
+        }
 
         $dossier->load(['client', 'vehicule.typeMoteur', 'conseiller', 'reservation', 'devis.lignes', 'ordreReparation']);
 
@@ -251,7 +273,12 @@ class DossierReceptionController extends Controller
      */
     public function destroy(DossierReception $dossier)
     {
-        if (! auth()->user()->hasPermission('supprimer_dossiers')) abort(403);
+       /** @var User|null $user */
+        $user = Auth::user();
+
+        if (!$user || !$user->hasPermission('voir_dossiers')) {
+            abort(403);
+        }
 
         if ($dossier->or_id) {
             return back()->with('error', "Impossible de supprimer {$dossier->numero} : un OR a déjà été créé à partir de ce dossier.");
@@ -266,7 +293,7 @@ class DossierReceptionController extends Controller
             }
 
             foreach ($dossier->photos ?? [] as $photo) {
-                \Storage::disk('public')->delete($photo['chemin']);
+                Storage::disk('public')->delete($photo['chemin']);
             }
 
             if ($dossier->reservation_id) {
@@ -289,7 +316,12 @@ class DossierReceptionController extends Controller
      */
     public function uploadFicheSignee(Request $request, DossierReception $dossier)
     {
-        if (! auth()->user()->hasPermission('creer_dossiers')) abort(403);
+       /** @var User|null $user */
+        $user = Auth::user();
+
+        if (!$user || !$user->hasPermission('voir_dossiers')) {
+            abort(403);
+        }
 
         $request->validate([
             'fiche_signee' => ['required', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:10240'],
@@ -300,10 +332,10 @@ class DossierReceptionController extends Controller
             'fiche_signee.max'      => 'Le fichier ne doit pas dépasser 10 Mo.',
         ]);
 
-        if ($dossier->fiche_signee) {
-            \Storage::disk('public')->delete($dossier->fiche_signee);
+       if ($dossier->fiche_signee) {
+            Storage::disk('public')->delete($dossier->fiche_signee);
         }
-
+        
         $path = $request->file('fiche_signee')->store('fiches-signees', 'public');
         $dossier->update(['fiche_signee' => $path]);
 
@@ -342,10 +374,20 @@ class DossierReceptionController extends Controller
         $eligibleGarantie = $dossier->vehicule->estEligibleGarantie();
 
         if ($eligibleGarantie) {
-            if (! auth()->user()->hasPermission('traiter_garanties')) abort(403);
+           /** @var User|null $user */
+            $user = Auth::user();
+
+            if (!$user || !$user->hasPermission('voir_dossiers')) {
+                abort(403);
+            }
             $typesAutorises = ['garantie'];
         } else {
-            if (! auth()->user()->hasPermission('gerer_devis')) abort(403);
+          /** @var User|null $user */
+        $user = Auth::user();
+
+        if (!$user || !$user->hasPermission('voir_dossiers')) {
+            abort(403);
+        }
             $typesAutorises = ['electrique', 'mecanique'];
         }
 
@@ -391,39 +433,6 @@ class DossierReceptionController extends Controller
             } . ($canalArrivee ? ' (' . ($canalArrivee === 'sans_rdv' ? 'Sans RDV' : 'RDV') . ')' : ''),
             default => 'Réception',
         };
-    }
-
-    /**
-     * Résout le palier kilométrique du barème constructeur à appliquer pour
-     * un entretien périodique. Identique à l'ancienne logique de
-     * OrdreReparationController — se base sur le dernier OR d'entretien réel
-     * effectué sur ce véhicule (source de vérité inchangée).
-     */
-    private function resoudrePalierEntretien(Vehicule $vehicule, int $kmActuel, int $typeMoteurId): ?int
-    {
-        $paliers = EntretienTache::where('type_moteur_id', $typeMoteurId)
-            ->where('designation', 'Huile moteur')
-            ->orderBy('km_seuil')
-            ->pluck('km_seuil')
-            ->all();
-
-        if (empty($paliers)) return null;
-
-        $dernierEntretien = \App\Models\OrdreReparation::where('vehicule_id', $vehicule->id)
-            ->where('type', 'entretien')
-            ->whereNotNull('entretien_km_seuil')
-            ->latest('date_entree')
-            ->first();
-
-        if ($dernierEntretien) {
-            $suivants = array_values(array_filter($paliers, fn ($p) => $p > $dernierEntretien->entretien_km_seuil));
-            $palierVise = $suivants[0] ?? end($paliers);
-        } else {
-            $atteints = array_values(array_filter($paliers, fn ($p) => $p <= $kmActuel + self::ENTRETIEN_MARGE_PROCHE));
-            $palierVise = empty($atteints) ? $paliers[0] : end($atteints);
-        }
-
-        return $palierVise;
     }
 
     /**

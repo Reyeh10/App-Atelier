@@ -9,6 +9,8 @@ use App\Models\Facture;
 use App\Models\OrdreReparation;
 use App\Models\User;
 use App\Models\Vehicule;
+use App\Services\EntretienService;
+use Illuminate\Support\Facades\Auth;
 
 /**
  * Contrôleur du tableau de bord principal.
@@ -71,6 +73,26 @@ class DashboardController extends Controller
             ->limit(5)
             ->get();
 
+        // ── Entretiens en retard signalés récemment (alerte chef de garage /
+        // réceptionniste uniquement — pas le caissier, cf. User::peutVoirAlerteEntretien()).
+        // Limitée à l'heure suivant la création de l'OR : passé ce délai, l'alerte
+        // disparaît du tableau de bord mais reste affichée en permanence sur la
+        // fiche de l'OR concerné (cf. ordres-reparations/show.blade.php).
+       $entretien_en_retard = collect();
+
+        /** @var User|null $user */
+        $user = Auth::user();
+        if ($user && $user->peutVoirAlerteEntretien()) {
+            $entretien_en_retard = OrdreReparation::with(['client', 'vehicule'])
+                ->where('type', 'entretien')
+                ->whereNotNull('entretien_km_seuil')
+                ->where('created_at', '>=', now()->subHour())
+                ->orderByDesc('created_at')
+                ->get()
+                ->filter(fn (OrdreReparation $or) => EntretienService::calculerRetard($or)['enRetard'])
+                ->values();
+        }
+
         // ── OR en attente de devis ou d'affectation (chef de garage) ─
         $or_attente_devis = OrdreReparation::with(['client', 'vehicule'])
             ->whereIn('statut', ['ouvert', 'diagnostic', 'devis_envoye'])
@@ -104,7 +126,7 @@ class DashboardController extends Controller
             'or_livres_mois', 'or_livres_annee',
             'devis_en_attente',
             'bons_commande_en_attente',
-            'or_en_retard',
+            'or_en_retard', 'entretien_en_retard',
             'or_attente_devis', 'or_affectes', 'or_prets_facturer'
         ));
     }

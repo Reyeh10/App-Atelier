@@ -242,7 +242,6 @@
         <div class="cv-block">
             <div class="row"><span class="lbl">N° de véhicule :</span> {{ $vehicule->immatriculation }}</div>
             <div class="row"><span class="lbl">Type de véhicule :</span> {{ $vehicule->modele ?? $vehicule->designation }}</div>
-            <div class="row"><span class="lbl">Propriétaire :</span> {{ strtoupper($client->nom_complet) }}</div>
             <div class="row"><span class="lbl">Numéro de Téléphone :</span> {{ $client->telephone }}</div>
         </div>
     </div>
@@ -261,7 +260,7 @@
             <col style="width:44px;">
             <col style="width:84px;">
             @if($hasRemise)<col style="width:52px;">@endif
-            <col style="width:80px;">
+            <col style="width:150px;">
         </colgroup>
         <thead>
             <tr class="thead-row">
@@ -327,32 +326,35 @@
             @endforeach
             @endif
 
-            {{-- ─ Remise globale ─ --}}
+            {{-- ─ Remise globale (uniquement si au moins une ligne a une remise) ─ --}}
             @if($hasRemise)
             <tr class="subtotal-row">
                 <td colspan="{{ $nbCols - 1 }}" class="tr" style="padding-right:8px;color:#555;white-space:nowrap;">Sous-total HT brut</td>
-                <td class="tr">{{ number_format($totalBrut, 0, ',', ' ') }}</td>
+                <td class="tr" style="white-space:nowrap;">{{ number_format($totalBrut, 0, ',', ' ') }}</td>
             </tr>
             <tr class="subtotal-row">
                 <td colspan="{{ $nbCols - 1 }}" class="tr" style="padding-right:8px;color:#c00;font-weight:700;white-space:nowrap;">Remise totale</td>
-                <td class="tr" style="color:#c00;font-weight:700;">- {{ number_format($totalRemise, 0, ',', ' ') }}</td>
+                <td class="tr" style="color:#c00;font-weight:700;white-space:nowrap;">- {{ number_format($totalRemise, 0, ',', ' ') }}</td>
             </tr>
+            @endif
+
+            {{-- ─ Total HT net + TVA — toujours affichés (pas seulement s'il y a une remise),
+                 sinon le saut de "pièces + main d'œuvre" au "TOTAL GÉNÉRAL" TTC est incompris ─ --}}
             <tr class="subtotal-row">
                 <td colspan="{{ $nbCols - 1 }}" class="tr" style="padding-right:8px;white-space:nowrap;">Total HT net</td>
-                <td class="tr bold">{{ number_format($devis->montant_ht, 0, ',', ' ') }}</td>
+                <td class="tr bold" style="white-space:nowrap;">{{ number_format($devis->montant_ht, 0, ',', ' ') }}</td>
             </tr>
             @if($devis->taux_tva > 0)
             <tr class="subtotal-row">
                 <td colspan="{{ $nbCols - 1 }}" class="tr" style="padding-right:8px;color:#555;white-space:nowrap;">TVA ({{ (int)$devis->taux_tva }} %)</td>
-                <td class="tr">{{ number_format($devis->montant_tva, 0, ',', ' ') }}</td>
+                <td class="tr" style="white-space:nowrap;">{{ number_format($devis->montant_tva, 0, ',', ' ') }}</td>
             </tr>
-            @endif
             @endif
 
             {{-- ─ Total général ─ --}}
             <tr class="total-row">
                 <td colspan="{{ $nbCols - 1 }}" class="tr" style="white-space:nowrap;">TOTAL GÉNÉRAL</td>
-                <td class="tr">{{ number_format($devis->montant_ttc, 0, ',', ' ') }}</td>
+                <td class="tr" style="white-space:nowrap;">{{ number_format($devis->montant_ttc, 0, ',', ' ') }} FDJ</td>
             </tr>
 
         </tbody>
