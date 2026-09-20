@@ -224,6 +224,7 @@ Route::middleware('auth')->group(function () {
     Route::middleware('perm:voir_factures')->group(function () {
         Route::get('/factures',                        [FactureController::class, 'index'])->name('factures.index');
         Route::get('/factures/bons-commande-clients',  [FactureController::class, 'bonsCommandeClients'])->name('factures.bons-commande-clients');
+        Route::get('/factures/a-facturer',             [FactureController::class, 'aFacturer'])->name('factures.a-facturer');
         Route::get('/factures/{facture}',              [FactureController::class, 'show'])->name('factures.show');
         Route::get('/factures/{facture}/imprimer',     [FactureController::class, 'imprimer'])->name('factures.imprimer');
     });

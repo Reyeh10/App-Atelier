@@ -63,6 +63,23 @@ class FactureController extends Controller
     }
 
     /**
+     * Véhicules terminés (statut "prêt") qui attendent d'être facturés. C'est ici —
+     * et uniquement ici — que la caissière crée la facture (avec ou sans frais de
+     * timbre). Un service gratuit n'est jamais facturé.
+     */
+    public function aFacturer()
+    {
+        $orsAFacturer = OrdreReparation::with(['client', 'vehicule', 'allDevis'])
+            ->where('statut', 'pret')
+            ->where('service_gratuit', false)
+            ->whereDoesntHave('facture')
+            ->orderBy('date_entree')
+            ->get();
+
+        return view('factures.a-facturer', compact('orsAFacturer'));
+    }
+
+    /**
      * Liste toutes les factures payées par bon de commande client (sociétés,
      * administrations...), avec le numéro de BC et le lien vers le scan joint
      * si un fichier a été téléversé au moment de l'encaissement.
@@ -133,7 +150,7 @@ class FactureController extends Controller
         $isSociete = in_array($ordresReparation->client->type, ['societe', 'assurance']);
 
         $request->validate([
-            'frais_timbre'           => ['nullable', 'numeric', 'min:0'],
+            'frais_timbre'           => ['nullable', 'boolean'],
             'date_echeance'          => ['nullable', 'date'],
             'notes'                  => ['nullable', 'string'],
             'lignes'                 => ['required', 'array', 'min:1'],
@@ -147,7 +164,6 @@ class FactureController extends Controller
         ], [
             'mode_paiement.required'       => 'Veuillez sélectionner le mode de paiement.',
             'mode_paiement.in'             => 'Le mode de paiement sélectionné est invalide.',
-            'frais_timbre.min'             => 'Les frais de timbre ne peuvent pas être négatifs.',
             'date_echeance.date'           => 'La date d\'échéance n\'est pas valide.',
             'lignes.required'              => 'La facture doit contenir au moins une ligne.',
             'lignes.min'                   => 'La facture doit contenir au moins une ligne.',
@@ -233,7 +249,8 @@ class FactureController extends Controller
                 'mode_paiement'      => null,
                 'date_emission'      => now(),
                 'notes'              => $request->notes,
-                'frais_timbre'       => $request->frais_timbre ?? 0,
+                // Optionnel : ajouté seulement si la caissière a coché la case (montant fixe).
+                'frais_timbre'       => $request->boolean('frais_timbre') ? 1000 : 0,
                 'montant_ht'         => $montantHt,
                 'taux_tva'           => $tauxTva,
                 'montant_tva'        => $tva,
@@ -245,7 +262,7 @@ class FactureController extends Controller
                 // constructeur approuvée, cf. commentaire $creditAutoGarantie ci-dessus.
                 'credit_accorde'     => $creditAutoGarantie,
                 'credit_accorde_at'  => $creditAutoGarantie ? now() : null,
-                'credit_accorde_par' => Auth::id(),
+                'credit_accorde_par' => $creditAutoGarantie ? Auth::id() : null,
             ]);
 
             // Création des lignes de détail de la facture
@@ -395,7 +412,7 @@ class FactureController extends Controller
      */
     public function revoquerCredit(Facture $facture)
     {
-        /** @var User|null $user */
+       /** @var User|null $user */
         $user = Auth::user();
 
         if (!$user || !$user->hasPermission('voir_factures')) {

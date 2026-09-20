@@ -75,12 +75,6 @@
                 <p class="text-xs text-yellow-800">La facture sera créée en mode <strong>non payée</strong>. Le caissier enregistrera le paiement ensuite.</p>
             </div>
             @endif
-            <div>
-                <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">TVA (%)</label>
-                @php $tauxTva = $or->allDevis->where('statut','accepte')->last()?->taux_tva ?? $or->allDevis->last()?->taux_tva ?? 10; @endphp
-                <input type="number" name="taux_tva" value="{{ $tauxTva }}" min="0" max="100" step="0.01"
-                       class="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
-            </div>
         </div>
     </div>
 </div>
@@ -211,16 +205,17 @@
 
     <div class="border-t border-gray-200 px-6 py-4 bg-gray-50">
         <div class="flex items-end justify-between">
-            <div class="flex items-center gap-3">
-                <label class="text-xs font-semibold text-slate-600">Frais de timbre (FDJ)</label>
-                <input type="number" name="frais_timbre" id="frais_timbre" value="1000" min="0" step="1"
-                       class="w-32 px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-right focus:outline-none focus:ring-2 focus:ring-orange-500"
-                       oninput="recalculerTotaux()">
-            </div>
+            {{-- Frais de timbre optionnels : ajoutés seulement si la caissière coche la case (1 000 FDJ fixes) --}}
+            <label class="flex items-center gap-3 cursor-pointer select-none bg-white border border-gray-300 hover:border-orange-400 rounded-xl px-4 py-2.5 transition-colors">
+                <input type="checkbox" name="frais_timbre" id="frais_timbre" value="1"
+                       class="w-4 h-4 text-orange-500 border-gray-300 rounded focus:ring-orange-500"
+                       onchange="recalculerTotaux()">
+                <span class="text-sm font-semibold text-slate-700">Ajouter les frais de timbre <span class="text-slate-400 font-normal">(1 000 FDJ)</span></span>
+            </label>
             <div class="space-y-2 min-w-64">
                 <div class="flex justify-between text-sm"><span class="text-slate-500">Total HT</span><span class="font-semibold" id="total-ht">0,00 FDJ</span></div>
-                <div class="flex justify-between text-sm"><span class="text-slate-500">TVA (<span id="taux-tva-display">10</span>%)</span><span class="font-semibold" id="total-tva">0,00 FDJ</span></div>
-                <div class="flex justify-between text-sm"><span class="text-slate-500">Frais de timbre</span><span class="font-semibold" id="total-timbre">1 000,00 FDJ</span></div>
+                <div class="flex justify-between text-sm"><span class="text-slate-500">TVA (10%)</span><span class="font-semibold" id="total-tva">0,00 FDJ</span></div>
+                <div class="flex justify-between text-sm"><span class="text-slate-500">Frais de timbre</span><span class="font-semibold" id="total-timbre">0,00 FDJ</span></div>
                 <div class="flex justify-between text-base font-bold border-t border-gray-300 pt-2"><span>Total général</span><span class="text-orange-500" id="total-ttc">0,00 FDJ</span></div>
             </div>
         </div>
@@ -292,22 +287,20 @@ function calculerLigne(input) {
 }
 
 function recalculerTotaux() {
+    // Taux fixe imposé par la direction — non modifiable par le formulaire.
     let ht = 0;
     document.querySelectorAll('.ligne-total-input').forEach(i => { ht += parseFloat(i.value)||0; });
-    const tva      = parseFloat(document.querySelector('[name="taux_tva"]').value)||0;
-    const timbre   = parseFloat(document.getElementById('frais_timbre').value)||0;
-    const tvaAmt   = ht * tva / 100;
-    const total    = ht + tvaAmt + timbre;
+    const tva    = ht * 0.10;
+    const timbre = document.getElementById('frais_timbre').checked ? 1000 : 0;
+    const total  = ht + tva + timbre;
     document.getElementById('total-ht').textContent     = formatFDJ(ht) + ' FDJ';
-    document.getElementById('total-tva').textContent    = formatFDJ(tvaAmt) + ' FDJ';
+    document.getElementById('total-tva').textContent    = formatFDJ(tva) + ' FDJ';
     document.getElementById('total-timbre').textContent = formatFDJ(timbre) + ' FDJ';
     document.getElementById('total-ttc').textContent    = formatFDJ(total) + ' FDJ';
-    document.getElementById('taux-tva-display').textContent = tva;
 }
 
 function formatFDJ(n) { return n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ' ').replace('.', ','); }
 
-document.querySelector('[name="taux_tva"]').addEventListener('input', recalculerTotaux);
 document.addEventListener('DOMContentLoaded', recalculerTotaux);
 </script>
 @endsection
