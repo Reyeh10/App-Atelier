@@ -3,6 +3,13 @@
 @section('page-title', 'Factures')
 @section('page-subtitle', 'Suivi des encaissements')
 
+@section('header-actions')
+<a href="{{ route('factures.bons-commande-clients') }}"
+   class="flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 border border-gray-300 rounded-lg px-3 py-2 transition-colors">
+    📋 Bons de commande clients
+</a>
+@endsection
+
 @section('content')
 <div class="space-y-4">
 

@@ -43,7 +43,7 @@
 </div>
 
 {{-- ── Centre d'alertes ─────────────────────────────────────── --}}
-@php $nbAlertes = ($or_en_retard->isNotEmpty() ? 1 : 0) + ($stats['or_garantie'] > 0 ? 1 : 0); @endphp
+@php $nbAlertes = ($or_en_retard->isNotEmpty() ? 1 : 0) + ($stats['or_garantie'] > 0 ? 1 : 0) + ($entretien_en_retard->isNotEmpty() ? 1 : 0); @endphp
 @if($nbAlertes > 0)
 <div class="mb-5 bg-white rounded-2xl border border-gray-200 overflow-hidden">
 
@@ -112,6 +112,55 @@
                                         <span class="text-slate-400"> ({{ $or->date_entree->format('d/m') }})</span>
                                     </td>
                                     <td class="px-4 py-2.5 text-slate-500">{{ $or->technicien?->name ?? '—' }}</td>
+                                </tr>
+                                @endforeach
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        @endif
+
+        {{-- Alerte : Entretiens en retard (chef de garage / réceptionniste uniquement,
+             disparaît du tableau de bord 1h après la création de l'OR — cf.
+             DashboardController::index() — mais reste en permanence sur la fiche OR). --}}
+        @if($entretien_en_retard->isNotEmpty())
+        <div class="p-5">
+            <div class="flex items-start gap-4">
+                <div class="w-9 h-9 rounded-xl bg-red-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                    </svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                    <p class="text-sm font-bold text-red-700">{{ $entretien_en_retard->count() }} entretien{{ $entretien_en_retard->count() > 1 ? 's' : '' }} en retard</p>
+                    <p class="text-xs text-slate-500 mt-0.5 mb-3">Palier d'entretien constructeur dépassé (km ou mois) — signalé à la réception du véhicule.</p>
+                    <div class="rounded-xl overflow-hidden border border-red-100">
+                        <table class="w-full text-xs">
+                            <thead>
+                                <tr class="bg-red-50">
+                                    <th class="px-4 py-2 text-left font-semibold text-red-600">N° OR</th>
+                                    <th class="px-4 py-2 text-left font-semibold text-red-600">Client</th>
+                                    <th class="px-4 py-2 text-left font-semibold text-red-600">Véhicule</th>
+                                    <th class="px-4 py-2 text-left font-semibold text-red-600">Dépassement</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-red-50 bg-white">
+                                @foreach($entretien_en_retard as $or)
+                                @php $retard = \App\Services\EntretienService::calculerRetard($or); @endphp
+                                <tr class="hover:bg-red-50 transition-colors">
+                                    <td class="px-4 py-2.5">
+                                        <a href="{{ route('ordres-reparations.show', $or) }}"
+                                           class="font-mono font-bold text-orange-500 hover:underline">{{ $or->numero }}</a>
+                                    </td>
+                                    <td class="px-4 py-2.5 text-slate-700 font-medium">{{ $or->client->nom_complet }}</td>
+                                    <td class="px-4 py-2.5 font-mono text-slate-600">{{ $or->vehicule->immatriculation }}</td>
+                                    <td class="px-4 py-2.5 font-bold text-red-600">
+                                        @if($retard['enRetardKm']){{ '+' . number_format($retard['depassementKm']) . ' km' }}@endif
+                                        @if($retard['enRetardKm'] && $retard['enRetardMois']){{ ' / ' }}@endif
+                                        @if($retard['enRetardMois']){{ '+' . $retard['depassementMois'] . ' mois' }}@endif
+                                    </td>
                                 </tr>
                                 @endforeach
                             </tbody>
@@ -235,7 +284,7 @@
     </div>
     <div class="space-y-2 max-h-64 overflow-y-auto">
         @foreach($or_prets_facturer as $or)
-        <a href="{{ route('ordres-reparations.show', $or) }}"
+        <a href="{{ route('factures.a-facturer') }}"
            class="flex items-center justify-between p-3 rounded-xl bg-green-50 hover:bg-green-100 transition-colors">
             <div>
                 <div class="flex items-center gap-2">

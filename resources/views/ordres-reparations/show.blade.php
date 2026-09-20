@@ -65,11 +65,6 @@
        class="flex items-center gap-2 text-sm bg-green-500 hover:bg-green-600 text-white rounded-lg px-3 py-2 transition-colors">
         🧾 {{ $or->facture->statut === 'payee' ? 'Facture payée' : 'Encaisser' }}
     </a>
-    @elseif($or->statut === 'pret' && ! $or->service_gratuit && auth()->user()->hasPermission('creer_factures'))
-    <a href="{{ route('factures.create', $or) }}"
-       class="flex items-center gap-2 text-sm bg-green-500 hover:bg-green-600 text-white rounded-lg px-3 py-2 transition-colors font-bold">
-        🧾 Créer la facture
-    </a>
     @endif
     <a href="{{ route('ordres-reparations.index') }}" class="flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 border border-gray-300 rounded-lg px-3 py-2 transition-colors">
         ← Retour
@@ -97,13 +92,12 @@
 </div>
 @endif
 
-{{-- ═══ BANNIÈRE ENTRETIEN EN RETARD ════ --}}
-@php
-    $depassementEntretien = ($or->type === 'entretien' && $or->entretien_km_seuil)
-        ? $or->kilometrage_entree - $or->entretien_km_seuil
-        : null;
-@endphp
-@if($depassementEntretien !== null && $depassementEntretien > 500)
+{{-- ═══ BANNIÈRE ENTRETIEN EN RETARD ════
+     Réservée au chef de garage et au réceptionniste (pas le caissier) — reste
+     affichée en permanence sur la fiche OR tant que le dépassement est réel
+     (contrairement à l'alerte équivalente du tableau de bord, limitée à 1h). --}}
+@php $retardEntretien = \App\Services\EntretienService::calculerRetard($or); @endphp
+@if($retardEntretien['enRetard'] && auth()->user()->peutVoirAlerteEntretien())
 <div class="mb-4 bg-red-50 border border-red-300 rounded-2xl p-4 flex items-center gap-4">
     <div class="w-10 h-10 bg-red-100 rounded-xl flex items-center justify-center flex-shrink-0">
         <svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -111,8 +105,13 @@
         </svg>
     </div>
     <div class="flex-1">
-        <p class="text-sm font-bold text-red-700">Entretien en retard de {{ number_format($depassementEntretien) }} km</p>
-        <p class="text-xs text-red-600 mt-0.5">Le véhicule a dépassé le palier de {{ number_format($or->entretien_km_seuil) }} km ({{ $or->vehicule->typeMoteur?->libelle }}) — vérifiez si un palier intermédiaire a été sauté avant de valider le devis.</p>
+        <p class="text-sm font-bold text-red-700">
+            Entretien en retard
+            @if($retardEntretien['enRetardKm']){{ ' de ' . number_format($retardEntretien['depassementKm']) . ' km' }}@endif
+            @if($retardEntretien['enRetardKm'] && $retardEntretien['enRetardMois']){{ ' et' }}@endif
+            @if($retardEntretien['enRetardMois']){{ ' de ' . $retardEntretien['depassementMois'] . ' mois' }}@endif
+        </p>
+        <p class="text-xs text-red-600 mt-0.5">Le véhicule a dépassé le palier de {{ number_format($or->entretien_km_seuil) }} km{{ $retardEntretien['moisSeuil'] ? ' / ' . $retardEntretien['moisSeuil'] . ' mois' : '' }} ({{ $or->vehicule->typeMoteur?->libelle }}) — vérifiez si un palier intermédiaire a été sauté avant de valider le devis.</p>
     </div>
 </div>
 @endif
@@ -153,23 +152,8 @@
 
 {{-- ═══ BANNIÈRE CAISSIER ══════════════════════════════════ --}}
 @if(auth()->user()->hasPermission('creer_factures') && ! $or->service_gratuit)
-    @if($or->statut === 'pret' && !$or->facture)
-    <div class="mb-4 bg-green-500 rounded-2xl p-5 flex items-center justify-between gap-4">
-        <div class="flex items-center gap-3 text-white">
-            <svg class="w-8 h-8 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
-            </svg>
-            <div>
-                <p class="font-bold text-lg">Véhicule prêt — À facturer</p>
-                <p class="text-green-100 text-sm">{{ $or->vehicule->immatriculation }} — {{ $or->client->nom_complet }} — Tél : {{ $or->client->telephone }}</p>
-            </div>
-        </div>
-        <a href="{{ route('factures.create', $or) }}"
-           class="flex-shrink-0 bg-white text-green-700 hover:bg-green-50 font-black text-base px-6 py-3 rounded-xl transition-colors shadow-sm whitespace-nowrap">
-            🧾 Créer la facture
-        </a>
-    </div>
-    @elseif($or->facture && $or->facture->statut === 'emise')
+    {{-- La création de la facture se fait uniquement depuis Factures → À facturer. --}}
+    @if($or->facture && $or->facture->statut === 'emise')
     <div class="mb-4 bg-blue-500 rounded-2xl p-5 flex items-center justify-between gap-4">
         <div class="flex items-center gap-3 text-white">
             <svg class="w-8 h-8 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -542,25 +526,6 @@
             </button>
         </form>
         @endif
-    </div>
-    @endif
-
-    {{-- Facturation --}}
-    @if($or->statut === 'pret' && !$or->facture && ! $or->service_gratuit && auth()->user()->hasPermission('creer_factures'))
-    <div class="bg-white rounded-2xl border-2 border-green-300 p-6">
-        <h3 class="font-semibold text-slate-800 mb-3 flex items-center gap-2">
-            <span class="w-3 h-3 rounded-full bg-green-500 inline-block"></span> Véhicule prêt — Créer la facture
-        </h3>
-        <p class="text-sm text-slate-500 mb-4">
-            Contacter le client <strong>{{ $or->client->telephone }}</strong> pour la récupération.
-            @if(in_array($or->client->type, ['societe','assurance']))
-            <span class="text-blue-600 font-medium">Client société → facturation sur compte.</span>
-            @endif
-        </p>
-        <a href="{{ route('factures.create', $or) }}"
-           class="block text-center w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2.5 rounded-xl text-sm transition-colors">
-            🧾 Créer la facture
-        </a>
     </div>
     @endif
 

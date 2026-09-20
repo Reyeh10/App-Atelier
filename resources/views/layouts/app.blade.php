@@ -57,6 +57,9 @@
                     ? \App\Models\OrdreReparation::pretsARestituer()->count()
                     : 0;
                 $nbFacturesNonPayees = $u->hasPermission('voir_factures') ? \App\Models\Facture::where('statut', 'emise')->count() : 0;
+                $nbAFacturer = $u->hasPermission('creer_factures')
+                    ? \App\Models\OrdreReparation::where('statut', 'pret')->where('service_gratuit', false)->whereDoesntHave('facture')->count()
+                    : 0;
                 $nbBcAReceptionner  = $u->hasPermission('voir_bons_commande')
                     ? \App\Models\BonCommande::where('statut', '!=', 'recu')
                         ->whereHas('lignes')
@@ -255,8 +258,20 @@
             </x-nav-link>
             @endif
 
+            @if($u->hasPermission('creer_factures'))
+            <x-nav-link href="{{ route('factures.a-facturer') }}" :active="request()->routeIs('factures.a-facturer') || request()->routeIs('factures.create')">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+                </svg>
+                <span class="flex-1">À facturer</span>
+                @if($nbAFacturer > 0)
+                <span class="inline-flex items-center justify-center bg-green-500 text-white text-[11px] font-bold min-w-[19px] h-[19px] px-1 rounded-full flex-shrink-0">{{ $nbAFacturer > 99 ? '99+' : $nbAFacturer }}</span>
+                @endif
+            </x-nav-link>
+            @endif
+
             @if($u->hasPermission('voir_factures'))
-            <x-nav-link href="{{ route('factures.index') }}" :active="request()->routeIs('factures.index') || request()->routeIs('factures.show') || request()->routeIs('factures.imprimer')">
+            <x-nav-link href="{{ route('factures.index') }}" :active="(request()->routeIs('factures.index') && ! request()->routeIs('factures.a-facturer')) || request()->routeIs('factures.show') || request()->routeIs('factures.imprimer')">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/>
                 </svg>
