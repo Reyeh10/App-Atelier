@@ -24,6 +24,7 @@ class Facture extends Model
     protected $fillable = [
         'numero', 'or_id', 'devis_id', 'client_id', 'marque_garantie_id', 'encaissement_global_id',
         'statut', 'mode_paiement',
+        'numero_bon_commande_client', 'bon_commande_client_chemin', 'bon_commande_client_nom_original',
         'date_emission', 'date_echeance', 'date_paiement', 'notes', 'frais_timbre',
         'montant_ht', 'taux_tva', 'montant_tva', 'montant_ttc', 'montant_paye',
         'credit_accorde', 'credit_accorde_at', 'credit_accorde_par',
@@ -228,14 +229,25 @@ class Facture extends Model
     public function getModePaiementLabel(): ?string
     {
         return match($this->mode_paiement) {
-            'especes'  => 'Espèces',
-            'cheque'   => 'Chèque',
-            'waafi'    => 'Waafi',
-            'cac'      => 'CAC',
-            'carte'    => 'Carte',
-            'virement' => 'Virement',
-            null       => 'En attente d\'encaissement',
-            default    => $this->mode_paiement,
+            'especes'      => 'Espèces',
+            'cheque'       => 'Chèque',
+            'waafi'        => 'Waafi',
+            'cac'          => 'CAC',
+            'carte'        => 'Carte',
+            'virement'     => 'Virement',
+            'bon_commande' => 'Bon de commande',
+            null           => 'En attente d\'encaissement',
+            default        => $this->mode_paiement,
         };
+    }
+
+    /**
+     * URL publique du scan/photo du bon de commande client joint au paiement,
+     * ou null si aucun fichier n'a été téléversé (le numéro peut être renseigné
+     * sans scan).
+     */
+    public function getBonCommandeClientUrlAttribute(): ?string
+    {
+        return $this->bon_commande_client_chemin ? asset('storage/' . $this->bon_commande_client_chemin) : null;
     }
 }

@@ -7,8 +7,12 @@ use App\Models\Facture;
 use App\Models\LigneFacture;
 use App\Models\MarqueGarantie;
 use App\Models\OrdreReparation;
+use App\Services\ArrondiFdjService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+
+use App\Models\User;
+use Illuminate\Support\Facades\Auth;
 
 /**
  * Contrôleur des Factures.
@@ -59,13 +63,50 @@ class FactureController extends Controller
     }
 
     /**
+     * Liste toutes les factures payées par bon de commande client (sociétés,
+     * administrations...), avec le numéro de BC et le lien vers le scan joint
+     * si un fichier a été téléversé au moment de l'encaissement.
+     */
+    public function bonsCommandeClients(Request $request)
+    {
+       /** @var User|null $user */
+        $user = Auth::user();
+
+        if (!$user || !$user->hasPermission('voir_factures')) {
+            abort(403);
+        }
+
+        $query = Facture::with(['client', 'ordreReparation'])
+            ->where('mode_paiement', 'bon_commande')
+            ->latest('date_paiement');
+
+        if ($recherche = $request->get('recherche')) {
+            $query->where(function ($q) use ($recherche) {
+                $q->where('numero_bon_commande_client', 'like', "%{$recherche}%")
+                  ->orWhere('numero', 'like', "%{$recherche}%")
+                  ->orWhereHas('client', fn ($c) => $c->where('nom', 'like', "%{$recherche}%"));
+            });
+        }
+
+        $totalBonsCommande = (clone $query)->sum('montant_ttc');
+        $factures = $query->paginate(30)->withQueryString();
+
+        return view('factures.bons-commande-clients', compact('factures', 'totalBonsCommande'));
+    }
+
+    /**
      * Affiche le formulaire de création d'une facture pour un OR donné.
      * Réservé aux utilisateurs avec la permission 'creer_factures' (caissier, admin).
      * Charge tous les devis de l'OR pour permettre de reprendre les lignes.
      */
     public function create(OrdreReparation $ordresReparation)
     {
-        if (! auth()->user()->hasPermission('creer_factures')) abort(403);
+       /** @var User|null $user */
+        $user = Auth::user();
+
+        if (!$user || !$user->hasPermission('voir_factures')) {
+            abort(403);
+        }
         $ordresReparation->load(['client', 'vehicule', 'allDevis.lignes']);
         return view('factures.create', ['or' => $ordresReparation]);
     }
@@ -82,12 +123,16 @@ class FactureController extends Controller
      */
     public function store(Request $request, OrdreReparation $ordresReparation)
     {
-        if (! auth()->user()->hasPermission('creer_factures')) abort(403);
+       /** @var User|null $user */
+        $user = Auth::user();
+
+        if (!$user || !$user->hasPermission('voir_factures')) {
+            abort(403);
+        }
 
         $isSociete = in_array($ordresReparation->client->type, ['societe', 'assurance']);
 
         $request->validate([
-            'taux_tva'               => ['required', 'numeric', 'min:0', 'max:100'],
             'frais_timbre'           => ['nullable', 'numeric', 'min:0'],
             'date_echeance'          => ['nullable', 'date'],
             'notes'                  => ['nullable', 'string'],
@@ -102,10 +147,6 @@ class FactureController extends Controller
         ], [
             'mode_paiement.required'       => 'Veuillez sélectionner le mode de paiement.',
             'mode_paiement.in'             => 'Le mode de paiement sélectionné est invalide.',
-            'taux_tva.required'            => 'Le taux de TVA est obligatoire.',
-            'taux_tva.numeric'             => 'Le taux de TVA doit être un nombre.',
-            'taux_tva.min'                 => 'Le taux de TVA ne peut pas être négatif.',
-            'taux_tva.max'                 => 'Le taux de TVA ne peut pas dépasser 100%.',
             'frais_timbre.min'             => 'Les frais de timbre ne peuvent pas être négatifs.',
             'date_echeance.date'           => 'La date d\'échéance n\'est pas valide.',
             'lignes.required'              => 'La facture doit contenir au moins une ligne.',
@@ -168,8 +209,12 @@ class FactureController extends Controller
                 ];
             }
 
-            $tva    = round($montantHt * $request->taux_tva / 100, 2);
-            $ttc    = $montantHt + $tva;
+            // Taux fixe imposé par la direction — non modifiable par le formulaire.
+            $tauxTva = 10;
+
+            // Ajuste le prix unitaire de la ligne la plus chère pour que le TTC final
+            // soit un multiple de 5 FDJ (pas de coupure de 1 ni 2 en circulation).
+            [$montantHt, $tva, $ttc] = ArrondiFdjService::arrondir($lignes, $tauxTva);
             $client = $ordresReparation->client;
 
             // Panne garantie approuvée : le client n'a rien à payer et n'a pas à
@@ -190,7 +235,7 @@ class FactureController extends Controller
                 'notes'              => $request->notes,
                 'frais_timbre'       => $request->frais_timbre ?? 0,
                 'montant_ht'         => $montantHt,
-                'taux_tva'           => $request->taux_tva,
+                'taux_tva'           => $tauxTva,
                 'montant_tva'        => $tva,
                 'montant_ttc'        => $ttc,
                 'montant_paye'       => 0,
@@ -200,7 +245,7 @@ class FactureController extends Controller
                 // constructeur approuvée, cf. commentaire $creditAutoGarantie ci-dessus.
                 'credit_accorde'     => $creditAutoGarantie,
                 'credit_accorde_at'  => $creditAutoGarantie ? now() : null,
-                'credit_accorde_par' => $creditAutoGarantie ? auth()->id() : null,
+                'credit_accorde_par' => Auth::id(),
             ]);
 
             // Création des lignes de détail de la facture
@@ -251,11 +296,18 @@ class FactureController extends Controller
      */
     public function marquerPayee(Request $request, Facture $facture)
     {
-        if (! auth()->user()->hasPermission('encaisser_factures')) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (!$user || !$user->hasPermission('voir_factures')) {
+            abort(403);
+        }
         $request->validate([
             'montant_paye'   => ['required', 'numeric', 'min:0'],
             'date_paiement'  => ['required', 'date'],
-            'mode_paiement'  => ['required', 'in:especes,cheque,waafi,cac,carte,virement'],
+            'mode_paiement'  => ['required', 'in:especes,cheque,waafi,cac,carte,virement,bon_commande'],
+            'numero_bon_commande_client' => ['required_if:mode_paiement,bon_commande', 'nullable', 'string', 'max:100'],
+            'bon_commande_scan'          => ['nullable', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:10240'],
         ], [
             'montant_paye.required'  => 'Le montant payé est obligatoire.',
             'montant_paye.numeric'   => 'Le montant payé doit être un nombre.',
@@ -264,15 +316,30 @@ class FactureController extends Controller
             'date_paiement.date'      => 'La date de paiement n\'est pas valide.',
             'mode_paiement.required'  => 'Veuillez sélectionner le mode de paiement.',
             'mode_paiement.in'        => 'Mode de paiement invalide.',
+            'numero_bon_commande_client.required_if' => 'Le numéro du bon de commande est obligatoire.',
+            'bon_commande_scan.mimes' => 'Le scan doit être une image (JPG, PNG) ou un PDF.',
+            'bon_commande_scan.max'   => 'Le scan ne doit pas dépasser 10 Mo.',
         ]);
 
-        $facture->update([
+        $data = [
             'montant_paye'  => $request->montant_paye,
             'date_paiement' => $request->date_paiement,
             'mode_paiement' => $request->mode_paiement ?? $facture->mode_paiement,
             // Facture payée seulement si le montant payé couvre le total
             'statut'        => $request->montant_paye >= $facture->montant_ttc ? 'payee' : 'emise',
-        ]);
+        ];
+
+        if ($request->mode_paiement === 'bon_commande') {
+            $data['numero_bon_commande_client'] = $request->numero_bon_commande_client;
+
+            if ($request->hasFile('bon_commande_scan')) {
+                $file = $request->file('bon_commande_scan');
+                $data['bon_commande_client_chemin']       = $file->store("bons-commande-clients/{$facture->id}", 'public');
+                $data['bon_commande_client_nom_original'] = $file->getClientOriginalName();
+            }
+        }
+
+        $facture->update($data);
 
         Activite::journaliser('payer_facture', "Paiement de {$request->montant_paye} FDJ enregistré sur facture {$facture->numero}", $facture);
         return back()->with('success', 'Paiement enregistré. Le réceptionniste peut maintenant restituer le véhicule.');
@@ -285,7 +352,12 @@ class FactureController extends Controller
      */
     public function accorderCredit(Request $request, Facture $facture)
     {
-        if (! auth()->user()->hasPermission('gerer_compte_credit')) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (!$user || !$user->hasPermission('voir_factures')) {
+            abort(403);
+        }
 
         $montantRestant = $facture->getMontantRestant();
 
@@ -310,7 +382,7 @@ class FactureController extends Controller
         $facture->update([
             'credit_accorde'     => true,
             'credit_accorde_at'  => now(),
-            'credit_accorde_par' => auth()->id(),
+            'credit_accorde_par' => Auth::id(),
         ]);
 
         Activite::journaliser('credit_facture', "Crédit accordé sur facture {$facture->numero}", $facture);
@@ -323,7 +395,12 @@ class FactureController extends Controller
      */
     public function revoquerCredit(Facture $facture)
     {
-        if (! auth()->user()->hasPermission('gerer_compte_credit')) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (!$user || !$user->hasPermission('voir_factures')) {
+            abort(403);
+        }
 
         $facture->update([
             'credit_accorde'     => false,

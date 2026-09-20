@@ -114,13 +114,20 @@ class ReservationService
     }
 
     /**
-     * Capacité simultanée d'une colonne/service donnée : celle réglée sur le
-     * service du catalogue (illimité si non renseignée), sinon 1 par défaut
-     * (Entretien périodique et tâches non catégorisées ne peuvent pas être
-     * doublées sur le même créneau, comme avant l'introduction du catalogue).
+     * Capacité simultanée d'une colonne/service donnée : pour "Entretien
+     * périodique", la capacité globale de l'atelier (`capacite_service_rapide_
+     * simultanee`, réglée dans Paramètres → Service Rapide — illimité si non
+     * renseignée) ; pour un service du catalogue "Autre", celle réglée
+     * spécifiquement sur ce service (illimité si non renseignée) ; sinon
+     * (tâche "Autre" non catégorisée) 1 par défaut, comme avant l'introduction
+     * du catalogue.
      */
     public static function capacitePourColonne(string $colonne): int|float
     {
+        if ($colonne === self::COLONNE_ENTRETIEN) {
+            return self::capacite() ?? INF;
+        }
+
         $service = ServiceRapide::where('slug', $colonne)->first();
         if ($service) {
             return $service->capacite_simultanee ?? INF;

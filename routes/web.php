@@ -223,6 +223,7 @@ Route::middleware('auth')->group(function () {
     // ── Factures ──────────────────────────────────────────────
     Route::middleware('perm:voir_factures')->group(function () {
         Route::get('/factures',                        [FactureController::class, 'index'])->name('factures.index');
+        Route::get('/factures/bons-commande-clients',  [FactureController::class, 'bonsCommandeClients'])->name('factures.bons-commande-clients');
         Route::get('/factures/{facture}',              [FactureController::class, 'show'])->name('factures.show');
         Route::get('/factures/{facture}/imprimer',     [FactureController::class, 'imprimer'])->name('factures.imprimer');
     });

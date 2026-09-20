@@ -144,6 +144,17 @@ class User extends Authenticatable
         return $this->isAdmin() || $this->hasPermission('gerer_bons_commande');
     }
 
+    /**
+     * Peut voir les alertes d'entretien en retard (fiche OR + tableau de
+     * bord) — concerne le chef de garage et le réceptionniste, qui gèrent la
+     * prise en charge du véhicule, mais pas le caissier dont le rôle se
+     * limite à la facturation.
+     */
+    public function peutVoirAlerteEntretien(): bool
+    {
+        return $this->isAdmin() || in_array($this->role, ['chef_garage', 'receptionniste'], true);
+    }
+
     // ── Labels et couleurs pour l'affichage ────────────────────────────
 
     /** Retourne le libellé français du rôle */
