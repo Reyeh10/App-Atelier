@@ -9,10 +9,9 @@ use App\Models\MarqueGarantie;
 use App\Models\OrdreReparation;
 use App\Services\ArrondiFdjService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
-
 use App\Models\User;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Contrôleur des Factures.
@@ -89,7 +88,7 @@ class FactureController extends Controller
        /** @var User|null $user */
         $user = Auth::user();
 
-        if (!$user || !$user->hasPermission('voir_factures')) {
+        if (! $user || ! $user->hasPermission('voir_factures')) {
             abort(403);
         }
 
@@ -118,10 +117,10 @@ class FactureController extends Controller
      */
     public function create(OrdreReparation $ordresReparation)
     {
-       /** @var User|null $user */
+        /** @var User|null $user */
         $user = Auth::user();
 
-        if (!$user || !$user->hasPermission('voir_factures')) {
+        if (! $user || ! $user->hasPermission('creer_factures')) {
             abort(403);
         }
         $ordresReparation->load(['client', 'vehicule', 'allDevis.lignes']);
@@ -140,10 +139,10 @@ class FactureController extends Controller
      */
     public function store(Request $request, OrdreReparation $ordresReparation)
     {
-       /** @var User|null $user */
+      /** @var User|null $user */
         $user = Auth::user();
 
-        if (!$user || !$user->hasPermission('voir_factures')) {
+        if (! $user || ! $user->hasPermission('creer_factures')) {
             abort(403);
         }
 
@@ -313,10 +312,10 @@ class FactureController extends Controller
      */
     public function marquerPayee(Request $request, Facture $facture)
     {
-        /** @var User|null $user */
+       /** @var User|null $user */
         $user = Auth::user();
 
-        if (!$user || !$user->hasPermission('voir_factures')) {
+        if (! $user || ! $user->hasPermission('encaisser_factures')) {
             abort(403);
         }
         $request->validate([
@@ -369,10 +368,10 @@ class FactureController extends Controller
      */
     public function accorderCredit(Request $request, Facture $facture)
     {
-        /** @var User|null $user */
+       /** @var User|null $user */
         $user = Auth::user();
 
-        if (!$user || !$user->hasPermission('voir_factures')) {
+        if (! $user || ! $user->hasPermission('gerer_compte_credit')) {
             abort(403);
         }
 
@@ -415,7 +414,7 @@ class FactureController extends Controller
        /** @var User|null $user */
         $user = Auth::user();
 
-        if (!$user || !$user->hasPermission('voir_factures')) {
+        if (! $user || ! $user->hasPermission('gerer_compte_credit')) {
             abort(403);
         }
 

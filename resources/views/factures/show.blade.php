@@ -34,7 +34,15 @@
             <span class="px-3 py-1.5 rounded-full text-sm font-bold bg-{{ $facture->getStatutColor() }}-100 text-{{ $facture->getStatutColor() }}-700">
                 {{ $facture->getStatutLabel() }}
             </span>
-            <span class="text-slate-500 text-sm">{{ $facture->getModePaiementLabel() }}</span>
+            <span class="text-slate-500 text-sm">
+                {{ $facture->getModePaiementLabel() }}
+                @if($facture->mode_paiement === 'bon_commande' && $facture->numero_bon_commande_client)
+                    — BC n° {{ $facture->numero_bon_commande_client }}
+                    @if($facture->bon_commande_client_url)
+                    <a href="{{ $facture->bon_commande_client_url }}" target="_blank" class="text-orange-500 hover:underline">(voir le scan)</a>
+                    @endif
+                @endif
+            </span>
             <span class="text-slate-500 text-sm">Émise le {{ $facture->date_emission->format('d/m/Y') }}</span>
             @if($facture->date_echeance)
             <span class="text-orange-600 text-sm font-medium">Échéance : {{ $facture->date_echeance->format('d/m/Y') }}</span>
@@ -87,18 +95,31 @@
     @if($facture->statut === 'emise' && $facture->getMontantRestant() > 0 && !$facture->credit_accorde && auth()->user()->hasPermission('encaisser_factures'))
     <div class="mt-4 border-t border-gray-100 pt-4">
         <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Paiement encaissé</p>
-        <form method="POST" action="{{ route('factures.payer', $facture) }}" class="space-y-3">
+        <form method="POST" action="{{ route('factures.payer', $facture) }}" enctype="multipart/form-data" class="space-y-3">
             @csrf @method('PATCH')
             <div>
                 <label class="block text-xs font-medium text-slate-600 mb-2">Mode de paiement</label>
                 <input type="hidden" name="mode_paiement" id="pay_mode_val" value="">
                 <div class="flex flex-wrap gap-2">
-                    @foreach(['especes' => 'Espèces', 'cheque' => 'Chèque', 'waafi' => 'Waafi', 'cac' => 'CAC', 'carte' => 'Carte', 'virement' => 'Virement'] as $val => $label)
+                    @foreach(['especes' => 'Espèces', 'cheque' => 'Chèque', 'waafi' => 'Waafi', 'cac' => 'CAC', 'carte' => 'Carte', 'virement' => 'Virement', 'bon_commande' => 'Bon de commande'] as $val => $label)
                     <button type="button" onclick="selectPayMode('{{ $val }}')" data-paymode="{{ $val }}"
                             class="pay-mode-btn border-2 rounded-xl px-4 py-1.5 text-xs font-bold transition-all border-gray-200 text-slate-600 hover:border-gray-300">
                         {{ $label }}
                     </button>
                     @endforeach
+                </div>
+            </div>
+            <div id="pay_bon_commande_champs" class="hidden flex gap-3 items-end flex-wrap bg-gray-50 rounded-xl p-3">
+                <div>
+                    <label class="block text-xs font-medium text-slate-600 mb-1">Numéro du bon de commande <span class="text-red-500">*</span></label>
+                    <input type="text" name="numero_bon_commande_client"
+                           class="px-3 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-500 w-48">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-600 mb-1">Scan / photo du bon (optionnel)</label>
+                    <input type="file" name="bon_commande_scan" accept=".jpg,.jpeg,.png,.pdf"
+                           class="text-sm text-slate-600 file:mr-3 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-gray-200 file:text-slate-700 hover:file:bg-gray-300">
+                    <p class="text-xs text-slate-400 mt-1">JPG, PNG ou PDF — 10 Mo max.</p>
                 </div>
             </div>
             <div class="flex gap-3 items-end flex-wrap">
@@ -130,6 +151,7 @@
                 btn.classList.toggle('border-gray-200', !active);
                 btn.classList.toggle('text-slate-600',  !active);
             });
+            document.getElementById('pay_bon_commande_champs').classList.toggle('hidden', val !== 'bon_commande');
         }
         </script>
     </div>

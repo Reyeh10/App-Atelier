@@ -16,9 +16,8 @@ use App\Models\User;
 use App\Models\Vehicule;
 use App\Services\EntretienService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
-
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
 /**
@@ -117,10 +116,11 @@ class OrdreReparationController extends Controller
      */
     public function store(Request $request)
     {
+       // if (! auth()->user()->hasPermission('creer_ordres')) abort(403);
         /** @var User|null $user */
         $user = Auth::user();
 
-        if (!$user || !$user->hasPermission('creer_ordres')) {
+        if (! $user || ! $user->hasPermission('creer_ordres')) {
             abort(403);
         }
 
@@ -313,10 +313,12 @@ class OrdreReparationController extends Controller
      */
     public function demarrerTravaux(OrdreReparation $ordresReparation)
     {
-        /** @var User|null $user */
+
+
+         /** @var User|null $user */
         $user = Auth::user();
 
-        if (!$user || !$user->hasPermission('gerer_ordres')) {
+        if (! $user || ! $user->hasPermission('gerer_ordres')) {
             abort(403);
         }
 
@@ -338,10 +340,11 @@ class OrdreReparationController extends Controller
      */
     public function terminerTravaux(Request $request, OrdreReparation $ordresReparation)
     {
-        /** @var User|null $user */
+
+         /** @var User|null $user */
         $user = Auth::user();
 
-        if (!$user || !$user->hasPermission('gerer_ordres')) {
+        if (! $user || ! $user->hasPermission('gerer_ordres')) {
             abort(403);
         }
 
@@ -372,10 +375,12 @@ class OrdreReparationController extends Controller
      */
     public function validerQualite(OrdreReparation $ordresReparation)
     {
+       // if (! auth()->user()->hasPermission('valider_qualite')) abort(403);
+
         /** @var User|null $user */
         $user = Auth::user();
 
-        if (!$user || !$user->hasPermission('valider_qualite')) {
+        if (! $user || ! $user->hasPermission('valider_qualite')) {
             abort(403);
         }
 
@@ -389,10 +394,12 @@ class OrdreReparationController extends Controller
      */
     public function terminerLavage(OrdreReparation $ordresReparation)
     {
-        /** @var User|null $user */
+      //  if (! auth()->user()->hasPermission('valider_lavage')) abort(403);
+
+       /** @var User|null $user */
         $user = Auth::user();
 
-        if (!$user || !$user->hasPermission('valider_lavage')) {
+        if (! $user || ! $user->hasPermission('valider_lavage')) {
             abort(403);
         }
 
@@ -415,10 +422,12 @@ class OrdreReparationController extends Controller
      */
     public function changerStatut(Request $request, OrdreReparation $ordresReparation)
     {
+       // if (! auth()->user()->hasPermission('gerer_ordres')) abort(403);
+
         /** @var User|null $user */
         $user = Auth::user();
 
-        if (!$user || !$user->hasPermission('gerer_ordres')) {
+        if (! $user || ! $user->hasPermission('gerer_ordres')) {
             abort(403);
         }
 
@@ -458,13 +467,14 @@ class OrdreReparationController extends Controller
      */
     public function affecter(Request $request, OrdreReparation $ordresReparation)
     {
+       // if (! auth()->user()->hasPermission('affecter_technicien')) abort(403);
+
         /** @var User|null $user */
         $user = Auth::user();
 
-        if (!$user || !$user->hasPermission('affecter_technicien')) {
+        if (! $user || ! $user->hasPermission('affecter_technicien')) {
             abort(403);
         }
-
         // Bloquer si un BC pièces existe et n'est pas encore entièrement reçu
         $bcEnAttente = $ordresReparation->bonsCommande()
             ->whereIn('statut', ['en_attente', 'commande'])
@@ -508,10 +518,12 @@ class OrdreReparationController extends Controller
      */
     public function uploadFicheSignee(Request $request, OrdreReparation $ordresReparation)
     {
+       // if (! auth()->user()->hasPermission('creer_dossiers')) abort(403);
+
         /** @var User|null $user */
         $user = Auth::user();
 
-        if (!$user || !$user->hasPermission('creer_dossiers')) {
+        if (! $user || ! $user->hasPermission('creer_dossiers')) {
             abort(403);
         }
 
@@ -542,10 +554,12 @@ class OrdreReparationController extends Controller
      */
     public function uploadFicheSigneeRestitution(Request $request, OrdreReparation $ordresReparation)
     {
-        /** @var User|null $user */
+        //if (! auth()->user()->hasPermission('restituer_vehicule')) abort(403);
+
+         /** @var User|null $user */
         $user = Auth::user();
 
-        if (!$user || !$user->hasPermission('restituer_vehicule')) {
+        if (! $user || ! $user->hasPermission('restituer_vehicule')) {
             abort(403);
         }
 
@@ -597,12 +611,14 @@ class OrdreReparationController extends Controller
      */
     public function restitution(OrdreReparation $ordresReparation)
     {
-        /** @var User|null $user */
+        //if (! auth()->user()->hasPermission('restituer_vehicule')) abort(403);
+         /** @var User|null $user */
         $user = Auth::user();
 
-        if (!$user || !$user->hasPermission('restituer_vehicule')) {
+        if (! $user || ! $user->hasPermission('restituer_vehicule')) {
             abort(403);
         }
+
         $ordresReparation->load(['client', 'vehicule', 'conseiller', 'technicien', 'photosOr']);
         return view('ordres-reparations.restitution', ['or' => $ordresReparation]);
     }
@@ -615,10 +631,12 @@ class OrdreReparationController extends Controller
      */
     public function restituer(Request $request, OrdreReparation $ordresReparation)
     {
+       // if (! auth()->user()->hasPermission('restituer_vehicule')) abort(403);
+
         /** @var User|null $user */
         $user = Auth::user();
 
-        if (!$user || !$user->hasPermission('restituer_vehicule')) {
+        if (! $user || ! $user->hasPermission('restituer_vehicule')) {
             abort(403);
         }
 
@@ -687,10 +705,12 @@ class OrdreReparationController extends Controller
      */
     public function imprimerRestitution(OrdreReparation $ordresReparation)
     {
+       // if (! auth()->user()->hasPermission('restituer_vehicule')) abort(403);
+
         /** @var User|null $user */
         $user = Auth::user();
 
-        if (!$user || !$user->hasPermission('restituer_vehicule')) {
+        if (! $user || ! $user->hasPermission('restituer_vehicule')) {
             abort(403);
         }
 
@@ -707,10 +727,12 @@ class OrdreReparationController extends Controller
      */
     public function changerStatutGarantie(Request $request, OrdreReparation $ordresReparation)
     {
+       // if (! auth()->user()->hasPermission('traiter_garanties')) abort(403);
+
         /** @var User|null $user */
         $user = Auth::user();
 
-        if (!$user || !$user->hasPermission('traiter_garanties')) {
+        if (! $user || ! $user->hasPermission('traiter_garanties')) {
             abort(403);
         }
 

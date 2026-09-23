@@ -8,9 +8,10 @@ use App\Models\Devis;
 use App\Models\Facture;
 use App\Models\OrdreReparation;
 use App\Models\User;
+
+use Illuminate\Support\Facades\Auth;
 use App\Models\Vehicule;
 use App\Services\EntretienService;
-use Illuminate\Support\Facades\Auth;
 
 /**
  * Contrôleur du tableau de bord principal.
@@ -78,11 +79,10 @@ class DashboardController extends Controller
         // Limitée à l'heure suivant la création de l'OR : passé ce délai, l'alerte
         // disparaît du tableau de bord mais reste affichée en permanence sur la
         // fiche de l'OR concerné (cf. ordres-reparations/show.blade.php).
-       $entretien_en_retard = collect();
-
         /** @var User|null $user */
         $user = Auth::user();
-        if ($user && $user->peutVoirAlerteEntretien()) {
+        $entretien_en_retard = collect();
+       if ($user && $user->peutVoirAlerteEntretien()) {
             $entretien_en_retard = OrdreReparation::with(['client', 'vehicule'])
                 ->where('type', 'entretien')
                 ->whereNotNull('entretien_km_seuil')
