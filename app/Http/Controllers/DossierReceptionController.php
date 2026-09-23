@@ -12,12 +12,10 @@ use App\Models\Reservation;
 use App\Models\Vehicule;
 use App\Services\EntretienService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
-
 use App\Models\User;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
-
 /**
  * Contrôleur des Dossiers de Réception.
  *
@@ -38,10 +36,10 @@ class DossierReceptionController extends Controller
      */
     public function index(Request $request)
     {
-       /** @var User|null $user */
+        /** @var User|null $user */
         $user = Auth::user();
 
-        if (!$user || !$user->hasPermission('voir_dossiers')) {
+        if (! $user || ! $user->hasPermission('voir_dossiers')) {
             abort(403);
         }
 
@@ -64,10 +62,11 @@ class DossierReceptionController extends Controller
      */
     public function create(Request $request)
     {
+       // if (! auth()->user()->hasPermission('creer_dossiers')) abort(403);
        /** @var User|null $user */
         $user = Auth::user();
 
-        if (!$user || !$user->hasPermission('voir_dossiers')) {
+        if (! $user || ! $user->hasPermission('creer_dossiers')) {
             abort(403);
         }
 
@@ -117,10 +116,11 @@ class DossierReceptionController extends Controller
      */
     public function store(Request $request)
     {
+       // if (! auth()->user()->hasPermission('creer_dossiers')) abort(403);
        /** @var User|null $user */
         $user = Auth::user();
 
-        if (!$user || !$user->hasPermission('voir_dossiers')) {
+        if (! $user || ! $user->hasPermission('creer_dossiers')) {
             abort(403);
         }
 
@@ -193,7 +193,7 @@ class DossierReceptionController extends Controller
         }
 
         $data['numero']               = DossierReception::genererNumero();
-       $data['conseiller_id'] = Auth::id();
+        $data['conseiller_id']        = Auth::id();
         $data['statut']               = 'nouveau';
         $data['accessoires_presents'] = $request->boolean('accessoires_presents');
         $data['signature_client']     = $request->boolean('signature_client');
@@ -252,10 +252,11 @@ class DossierReceptionController extends Controller
      */
     public function show(DossierReception $dossier)
     {
+       // if (! auth()->user()->hasPermission('voir_dossiers')) abort(403);
        /** @var User|null $user */
         $user = Auth::user();
 
-        if (!$user || !$user->hasPermission('voir_dossiers')) {
+        if (! $user || ! $user->hasPermission('voir_dossiers')) {
             abort(403);
         }
 
@@ -273,13 +274,13 @@ class DossierReceptionController extends Controller
      */
     public function destroy(DossierReception $dossier)
     {
-       /** @var User|null $user */
+       // if (! auth()->user()->hasPermission('supprimer_dossiers')) abort(403);
+        /** @var User|null $user */
         $user = Auth::user();
 
-        if (!$user || !$user->hasPermission('voir_dossiers')) {
+        if (! $user || ! $user->hasPermission('supprimer_dossiers')) {
             abort(403);
         }
-
         if ($dossier->or_id) {
             return back()->with('error', "Impossible de supprimer {$dossier->numero} : un OR a déjà été créé à partir de ce dossier.");
         }
@@ -293,7 +294,7 @@ class DossierReceptionController extends Controller
             }
 
             foreach ($dossier->photos ?? [] as $photo) {
-                Storage::disk('public')->delete($photo['chemin']);
+               Storage::disk('public')->delete($photo['chemin']);
             }
 
             if ($dossier->reservation_id) {
@@ -316,10 +317,11 @@ class DossierReceptionController extends Controller
      */
     public function uploadFicheSignee(Request $request, DossierReception $dossier)
     {
+       // if (! auth()->user()->hasPermission('creer_dossiers')) abort(403);
        /** @var User|null $user */
         $user = Auth::user();
 
-        if (!$user || !$user->hasPermission('voir_dossiers')) {
+        if (! $user || ! $user->hasPermission('creer_dossiers')) {
             abort(403);
         }
 
@@ -332,10 +334,10 @@ class DossierReceptionController extends Controller
             'fiche_signee.max'      => 'Le fichier ne doit pas dépasser 10 Mo.',
         ]);
 
-       if ($dossier->fiche_signee) {
+        if ($dossier->fiche_signee) {
             Storage::disk('public')->delete($dossier->fiche_signee);
         }
-        
+
         $path = $request->file('fiche_signee')->store('fiches-signees', 'public');
         $dossier->update(['fiche_signee' => $path]);
 
@@ -374,20 +376,22 @@ class DossierReceptionController extends Controller
         $eligibleGarantie = $dossier->vehicule->estEligibleGarantie();
 
         if ($eligibleGarantie) {
+           // if (! auth()->user()->hasPermission('traiter_garanties')) abort(403);
            /** @var User|null $user */
             $user = Auth::user();
 
-            if (!$user || !$user->hasPermission('voir_dossiers')) {
+            if (! $user || ! $user->hasPermission('traiter_garanties')) {
                 abort(403);
             }
             $typesAutorises = ['garantie'];
         } else {
-          /** @var User|null $user */
-        $user = Auth::user();
+           // if (! auth()->user()->hasPermission('gerer_devis')) abort(403);
+           /** @var User|null $user */
+            $user = Auth::user();
 
-        if (!$user || !$user->hasPermission('voir_dossiers')) {
-            abort(403);
-        }
+            if (! $user || ! $user->hasPermission('gerer_devis')) {
+                abort(403);
+            }
             $typesAutorises = ['electrique', 'mecanique'];
         }
 

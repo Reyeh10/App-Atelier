@@ -9,10 +9,17 @@
         html, body { width: 210mm; background: #fff; }
         body { font-family: Arial, sans-serif; font-size: 9.5pt; color: #111; }
 
+        /* ── Tenue sur une seule page ──
+           Le contenu (nombre de lignes main d'œuvre / pièces / contrôles...) varie
+           selon l'OR — impossible à garantir en CSS statique. .page-outer représente
+           la feuille A4 imprimable exacte (210×297mm, hauteur fixe, débordement masqué) ;
+           .page est le contenu réel, réduit dynamiquement en JS (cf. ajusterPourUnePage())
+           s'il dépasse cette hauteur, pour toujours tenir sur une seule feuille. */
+        .page-outer { width: 210mm; height: 297mm; overflow: hidden; background: #fff; }
         .page { width: 210mm; padding: 8mm 11mm 6mm; }
         @media screen {
             html, body { width: 100%; background: #d1d5db; }
-            .page { margin: 55px auto 40px; box-shadow: 0 4px 24px rgba(0,0,0,.18); }
+            .page-outer { margin: 55px auto 40px; box-shadow: 0 4px 24px rgba(0,0,0,.18); }
         }
 
         /* ── En-tête ── */
@@ -88,6 +95,7 @@
         @media print {
             .no-print { display: none !important; }
             body { margin: 0; }
+            .page-outer { height: 297mm; }
             .page { padding: 6mm 9mm 5mm; }
         }
 
@@ -112,7 +120,8 @@
     <button onclick="window.print()" class="print-btn">🖨 Imprimer</button>
 </div>
 
-<div class="page">
+<div class="page-outer" id="page-outer">
+<div class="page" id="page-content">
 
     {{-- ── En-tête ── --}}
     <div class="header">
@@ -401,10 +410,38 @@
     </div>
 
 </div>
+</div>
 
 <script>
+// Réduit (jamais n'agrandit) le contenu pour qu'il tienne toujours sur une seule
+// page A4, quel que soit le nombre de lignes de l'OR (main d'œuvre, pièces,
+// contrôles/nettoyage/lubrification). L'origine "top center" fait rétrécir le
+// contenu symétriquement autour de son centre horizontal, ce qui le garde centré
+// sans avoir à recalculer de décalage.
+function ajusterPourUnePage() {
+    var outer   = document.getElementById('page-outer');
+    var content = document.getElementById('page-content');
+    if (!outer || !content) return;
+
+    content.style.transform = 'none';
+    var hauteurMax = outer.clientHeight;
+    var hauteurContenu = content.scrollHeight;
+
+    if (hauteurContenu > hauteurMax) {
+        var echelle = hauteurMax / hauteurContenu;
+        content.style.transformOrigin = 'top center';
+        content.style.transform = 'scale(' + echelle + ')';
+    }
+}
+
+window.addEventListener('load', function () {
+    ajusterPourUnePage();
 @if(!request('apercu'))
-window.addEventListener('load', function () { setTimeout(window.print, 400); });
+    setTimeout(window.print, 400);
+@endif
+});
+window.addEventListener('beforeprint', ajusterPourUnePage);
+@if(!request('apercu'))
 window.onafterprint = function () { window.close(); };
 @endif
 </script>

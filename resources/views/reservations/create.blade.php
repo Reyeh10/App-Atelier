@@ -196,6 +196,11 @@
                         <input type="text" id="mv_modele" class="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
                     </div>
                     <div>
+                        <label class="block text-xs font-medium text-slate-600 mb-1">Date de mise en circulation <span class="text-red-500">*</span></label>
+                        <input type="date" id="mv_date_mise_circulation" max="{{ date('Y-m-d') }}"
+                               class="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    </div>
+                    <div>
                         <label class="block text-xs font-medium text-slate-600 mb-1">Motorisation</label>
                         <select id="mv_motorisation" class="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-500">
                             <option value="diesel">Diesel</option>
@@ -222,6 +227,13 @@
                         </select>
                         <p class="text-xs text-slate-400 mt-1">Choix définitif — si "Non", ce véhicule ne pourra jamais être affecté à l'équipe garantie.</p>
                     </div>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-600 mb-1">VIN / N° Châssis <span class="text-red-500">*</span></label>
+                    <input type="text" id="mv_vin" placeholder="VF1…" maxlength="17" minlength="17"
+                           style="text-transform:uppercase"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <p class="text-xs text-slate-400 mt-1">Exactement 17 caractères alphanumériques (ni plus, ni moins).</p>
                 </div>
             </div>
             <div class="px-6 pb-5 flex gap-3">
@@ -343,9 +355,11 @@ async function sauvegarderVehicule() {
         immatriculation: document.getElementById('mv_immat').value.trim().toUpperCase(),
         marque: document.getElementById('mv_marque').value.trim(),
         modele: document.getElementById('mv_modele').value.trim(),
+        date_mise_circulation: document.getElementById('mv_date_mise_circulation').value,
         motorisation: document.getElementById('mv_motorisation').value,
         categorie: document.getElementById('mv_categorie').value || null,
         sous_garantie: document.getElementById('mv_sous_garantie').value,
+        vin: document.getElementById('mv_vin').value.trim().toUpperCase(),
     };
     try {
         const res = await fetch('/api/vehicules/rapide', {

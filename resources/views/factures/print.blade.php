@@ -149,10 +149,15 @@
                 <span class="client-lbl">Type de service :</span>
                 <span class="client-val">{{ $or->getServiceLabel() }}</span>
             </div>
+            {{-- "Propriétaire" n'est utile que si le payeur (DOIT, ci-contre) diffère du
+                 propriétaire du véhicule — cas d'une facture adressée au compte garantie
+                 constructeur. Sinon DOIT affiche déjà le même nom, pas besoin de le répéter. --}}
+            @if($facture->marque_garantie_id)
             <div class="client-row">
                 <span class="client-lbl">Propriétaire :</span>
                 <span class="client-val">{{ $facture->client->nom_complet }}</span>
             </div>
+            @endif
             @if($facture->date_echeance)
             <div class="client-row">
                 <span class="client-lbl">Échéance :</span>
@@ -190,7 +195,7 @@
             <col style="width:40px;">
             <col style="width:82px;">
             @if($hasRemiseF)<col style="width:52px;">@endif
-            <col style="width:84px;">
+            <col style="width:150px;">
         </colgroup>
         <thead>
             <tr>
@@ -270,43 +275,36 @@
             <col style="width:40px;">
             <col style="width:82px;">
             @if($hasRemiseF)<col style="width:52px;">@endif
-            <col style="width:84px;">
+            <col style="width:150px;">
         </colgroup>
         <tbody>
             @if($hasRemiseF)
             <tr class="subtotal-row">
                 <td colspan="{{ $nbColsF - 1 }}" class="r" style="padding-right:10px;color:#555;white-space:nowrap;">Sous-total HT brut</td>
-                <td class="r">{{ number_format($totalBrutF, 0, ',', ' ') }}</td>
+                <td class="r" style="white-space:nowrap;">{{ number_format($totalBrutF, 0, ',', ' ') }}</td>
             </tr>
             <tr class="subtotal-row">
                 <td colspan="{{ $nbColsF - 1 }}" class="r" style="padding-right:10px;color:#c00;font-weight:700;white-space:nowrap;">Remise totale</td>
-                <td class="r" style="color:#c00;font-weight:700;">- {{ number_format($totalRemiseF, 0, ',', ' ') }}</td>
+                <td class="r" style="color:#c00;font-weight:700;white-space:nowrap;">- {{ number_format($totalRemiseF, 0, ',', ' ') }}</td>
             </tr>
+            @endif
             <tr class="subtotal-row">
                 <td colspan="{{ $nbColsF - 1 }}" class="r" style="padding-right:10px;white-space:nowrap;">Total HT net</td>
-                <td class="r">{{ number_format($facture->montant_ht, 0, ',', ' ') }}</td>
+                <td class="r" style="white-space:nowrap;">{{ number_format($facture->montant_ht, 0, ',', ' ') }}</td>
             </tr>
-            @elseif($facture->taux_tva > 0)
             <tr class="subtotal-row">
-                <td colspan="{{ $nbColsF - 1 }}" class="r" style="padding-right:10px;white-space:nowrap;">Total HT</td>
-                <td class="r">{{ number_format($facture->montant_ht, 0, ',', ' ') }}</td>
+                <td colspan="{{ $nbColsF - 1 }}" class="r" style="padding-right:10px;color:#555;white-space:nowrap;">TVA ({{ (int) $facture->taux_tva }}%)</td>
+                <td class="r" style="white-space:nowrap;">{{ number_format($facture->montant_tva, 0, ',', ' ') }}</td>
             </tr>
-            @endif
-            @if($facture->taux_tva > 0)
-            <tr class="subtotal-row">
-                <td colspan="{{ $nbColsF - 1 }}" class="r" style="padding-right:10px;white-space:nowrap;">TVA ({{ (int)$facture->taux_tva }} %)</td>
-                <td class="r">{{ number_format($facture->montant_tva, 0, ',', ' ') }}</td>
-            </tr>
-            @endif
             @if(($facture->frais_timbre ?? 0) > 0)
             <tr class="subtotal-row">
                 <td colspan="{{ $nbColsF - 1 }}" class="r" style="padding-right:10px;font-weight:700;white-space:nowrap;">FRAIS DE TIMBRE</td>
-                <td class="r" style="font-weight:700;">{{ number_format($facture->frais_timbre, 0, ',', ' ') }}</td>
+                <td class="r" style="font-weight:700;white-space:nowrap;">{{ number_format($facture->frais_timbre, 0, ',', ' ') }}</td>
             </tr>
             @endif
             <tr style="background:#111;color:#fff;">
                 <td colspan="{{ $nbColsF - 1 }}" class="r" style="padding:6px 10px;font-weight:900;font-size:11pt;white-space:nowrap;">TOTAL</td>
-                <td class="r" style="padding:6px 6px;font-weight:900;font-size:11pt;">{{ number_format($facture->totalGeneral(), 0, ',', ' ') }}</td>
+                <td class="r" style="padding:6px 6px;font-weight:900;font-size:11pt;white-space:nowrap;">{{ number_format($facture->totalGeneral(), 0, ',', ' ') }} FDJ</td>
             </tr>
         </tbody>
     </table>
