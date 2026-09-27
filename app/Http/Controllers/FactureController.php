@@ -68,7 +68,7 @@ class FactureController extends Controller
      */
     public function aFacturer()
     {
-        $orsAFacturer = OrdreReparation::with(['client', 'vehicule', 'allDevis'])
+        $orsAFacturer = OrdreReparation::with(['client', 'vehicule', 'allDevis', 'photosOr'])
             ->where('statut', 'pret')
             ->where('service_gratuit', false)
             ->whereDoesntHave('facture')
@@ -183,6 +183,14 @@ class FactureController extends Controller
         $marqueGarantie = null;
 
         if ($estGarantieApprouvee) {
+            // Dossier de preuves garantie (VIN, tableau de bord, pièce endommagée,
+            // pièce neuve, référence pièce — vidéo du bruit facultative) obligatoire
+            // avant de facturer, pour pouvoir le joindre à la réclamation constructeur.
+            $categoriesManquantes = $ordresReparation->categoriesGarantieManquantes();
+            if (! empty($categoriesManquantes)) {
+                return back()->with('error', 'Impossible de créer la facture : le dossier de preuves garantie est incomplet — il manque : ' . implode(', ', $categoriesManquantes) . '. Ajoutez ces photos depuis la fiche de l\'OR.');
+            }
+
             $marqueGarantie = MarqueGarantie::pourMarque($ordresReparation->vehicule->marque);
             if (! $marqueGarantie) {
                 return back()->with('error', "Impossible de créer la facture : aucun compte garantie constructeur n'est configuré pour la marque « {$ordresReparation->vehicule->marque} ». Ajoutez-le dans Réglages atelier → Garantie constructeur avant de facturer.");

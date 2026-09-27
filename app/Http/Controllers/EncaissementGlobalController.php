@@ -5,17 +5,25 @@ namespace App\Http\Controllers;
 use App\Models\Client;
 use App\Models\EncaissementGlobal;
 use App\Models\Facture;
+use App\Models\MarqueGarantie;
 use Illuminate\Http\Request;
+use App\Models\User;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Contrôleur des Encaissements Globaux.
  *
- * Un encaissement global permet de regrouper plusieurs factures d'un même client
- * (société ou assurance avec compte crédit) en un seul paiement.
- * Exemple : la société X a 5 factures impayées → on crée un encaissement global
- * qui les regroupe toutes, et lorsqu'il est marqué payé, les 5 factures passent à "payée".
+ * Un encaissement global permet de regrouper plusieurs factures d'un même payeur
+ * en un seul paiement — soit un client (société ou assurance avec compte crédit),
+ * soit une marque garantie constructeur (elle aussi soumise à un plafond de crédit,
+ * cf. MarqueGarantie::plafond_credit, pour les factures des pannes couvertes par
+ * la garantie). Exemple : la société X (ou la marque GWM) a 5 factures impayées →
+ * on crée un encaissement global qui les regroupe toutes, et lorsqu'il est marqué
+ * payé, les 5 factures passent à "payée".
  *
- * Ce module est destiné aux clients ayant un compte crédit actif uniquement.
+ * Ce module est destiné aux clients à compte crédit actif et aux marques garantie
+ * actives uniquement — jamais les deux à la fois sur un même encaissement.
  */
 class EncaissementGlobalController extends Controller
 {
@@ -24,9 +32,14 @@ class EncaissementGlobalController extends Controller
      */
     public function index()
     {
-        if (! auth()->user()->hasPermission('voir_encaissements')) abort(403);
+      /** @var User|null $user */
+        $user = Auth::user();
 
-        $encaissements = EncaissementGlobal::with('client')
+        if (! $user || ! $user->hasPermission('voir_encaissements')) {
+            abort(403);
+        }
+
+        $encaissements = EncaissementGlobal::with('client', 'marqueGarantie')
             ->orderByDesc('created_at')
             ->paginate(30);
 
@@ -35,63 +48,103 @@ class EncaissementGlobalController extends Controller
 
     /**
      * Affiche le formulaire de création d'un encaissement global.
-     * Pré-sélectionne le client si son ID est fourni en paramètre URL.
-     * Charge uniquement les factures émises et non encore regroupées dans un autre encaissement.
-     * Seuls les clients avec un compte crédit actif peuvent faire l'objet d'un encaissement global.
+     * Pré-sélectionne le payeur (client ou marque garantie) si son ID est fourni
+     * en paramètre URL. Charge uniquement les factures émises et non encore
+     * regroupées dans un autre encaissement.
      */
     public function create(Request $request)
     {
-        if (! auth()->user()->hasPermission('gerer_encaissements')) abort(403);
+      //  if (! auth()->user()->hasPermission('gerer_encaissements')) abort(403);
+      /** @var User|null $user */
+        $user = Auth::user();
 
-        $clientId = $request->query('client_id');
-        $client   = null;
+        if (! $user || ! $user->hasPermission('gerer_encaissements')) {
+            abort(403);
+        }
+
+        $clientId         = $request->query('client_id');
+        $marqueGarantieId = $request->query('marque_garantie_id');
+        $client           = null;
+        $marqueGarantie   = null;
 
         if ($clientId) {
             // On s'assure que le client a bien un compte crédit actif
             $client = Client::where('id', $clientId)->where('compte_actif', true)->firstOrFail();
+        } elseif ($marqueGarantieId) {
+            $marqueGarantie = MarqueGarantie::where('id', $marqueGarantieId)->where('actif', true)->firstOrFail();
         }
 
         // Factures émises (non payées) et non déjà rattachées à un autre encaissement
-        $facturesDisponibles = $client
-            ? Facture::where('client_id', $client->id)
+        $facturesDisponibles = collect();
+        if ($client) {
+            $facturesDisponibles = Facture::where('client_id', $client->id)
+                     ->whereNull('marque_garantie_id')
                      ->where('statut', 'emise')
                      ->whereNull('encaissement_global_id')
                      ->with('ordreReparation')
                      ->orderBy('date_emission')
-                     ->get()
-            : collect();
+                     ->get();
+        } elseif ($marqueGarantie) {
+            $facturesDisponibles = Facture::where('marque_garantie_id', $marqueGarantie->id)
+                     ->where('statut', 'emise')
+                     ->whereNull('encaissement_global_id')
+                     ->with('ordreReparation')
+                     ->orderBy('date_emission')
+                     ->get();
+        }
 
-        // Liste de tous les clients avec compte crédit actif pour le sélecteur
+        // Listes pour le sélecteur : clients à compte crédit actif + marques garantie actives
         $clients = Client::where('compte_actif', true)->orderBy('nom')->get();
+        $marques = MarqueGarantie::where('actif', true)->orderBy('nom')->get();
 
-        return view('encaissements-globaux.create', compact('client', 'facturesDisponibles', 'clients'));
+        return view('encaissements-globaux.create', compact('client', 'marqueGarantie', 'facturesDisponibles', 'clients', 'marques'));
     }
 
     /**
      * Crée un encaissement global à partir des factures sélectionnées.
-     * Double vérification que les factures appartiennent bien au client et sont éligibles
-     * (statut émise, pas encore dans un autre encaissement) pour éviter les incohérences.
-     * Le montant total est calculé automatiquement à partir des factures sélectionnées.
+     * Double vérification que les factures appartiennent bien au payeur choisi et sont
+     * éligibles (statut émise, pas encore dans un autre encaissement) pour éviter les
+     * incohérences. Le montant total est calculé automatiquement à partir des factures
+     * sélectionnées. Le payeur est soit un client, soit une marque garantie — jamais les deux.
      */
     public function store(Request $request)
     {
-        if (! auth()->user()->hasPermission('gerer_encaissements')) abort(403);
+       // if (! auth()->user()->hasPermission('gerer_encaissements')) abort(403);
+
+       /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->hasPermission('gerer_encaissements')) {
+            abort(403);
+        }
+
         $request->validate([
-            'client_id'      => 'required|exists:clients,id',
-            'facture_ids'    => 'required|array|min:1',
-            'facture_ids.*'  => 'exists:factures,id',
-            'mode_paiement'  => 'required|string',
-            'notes'          => 'nullable|string|max:500',
+            'client_id'          => 'nullable|required_without:marque_garantie_id|exists:clients,id',
+            'marque_garantie_id' => 'nullable|required_without:client_id|exists:marques_garantie,id',
+            'facture_ids'        => 'required|array|min:1',
+            'facture_ids.*'      => 'exists:factures,id',
+            'mode_paiement'      => 'required|string',
+            'notes'              => 'nullable|string|max:500',
         ]);
 
-        $client = Client::where('id', $request->client_id)->where('compte_actif', true)->firstOrFail();
+        $client = $marqueGarantie = null;
 
-        // Re-vérification des factures côté serveur pour éviter toute manipulation
-        $factures = Facture::whereIn('id', $request->facture_ids)
-                           ->where('client_id', $client->id)
-                           ->where('statut', 'emise')
-                           ->whereNull('encaissement_global_id')
-                           ->get();
+        if ($request->marque_garantie_id) {
+            $marqueGarantie = MarqueGarantie::where('id', $request->marque_garantie_id)->where('actif', true)->firstOrFail();
+            $factures = Facture::whereIn('id', $request->facture_ids)
+                               ->where('marque_garantie_id', $marqueGarantie->id)
+                               ->where('statut', 'emise')
+                               ->whereNull('encaissement_global_id')
+                               ->get();
+        } else {
+            $client = Client::where('id', $request->client_id)->where('compte_actif', true)->firstOrFail();
+            $factures = Facture::whereIn('id', $request->facture_ids)
+                               ->where('client_id', $client->id)
+                               ->whereNull('marque_garantie_id')
+                               ->where('statut', 'emise')
+                               ->whereNull('encaissement_global_id')
+                               ->get();
+        }
 
         if ($factures->isEmpty()) {
             return back()->withErrors(['facture_ids' => 'Aucune facture valide sélectionnée.']);
@@ -101,14 +154,15 @@ class EncaissementGlobalController extends Controller
         $montantTotal = $factures->sum(fn($f) => $f->totalGeneral());
 
         $eg = EncaissementGlobal::create([
-            'numero'        => EncaissementGlobal::genererNumero(),
-            'client_id'     => $client->id,
-            'montant_total' => $montantTotal,
-            'statut'        => 'emis',
-            'mode_paiement' => $request->mode_paiement,
-            'date_emission' => now()->toDateString(),
-            'notes'         => $request->notes,
-            'created_by_id' => auth()->id(),
+            'numero'             => EncaissementGlobal::genererNumero(),
+            'client_id'          => $client?->id,
+            'marque_garantie_id' => $marqueGarantie?->id,
+            'montant_total'      => $montantTotal,
+            'statut'             => 'emis',
+            'mode_paiement'      => $request->mode_paiement,
+            'date_emission'      => now()->toDateString(),
+            'notes'              => $request->notes,
+            'created_by_id'      => Auth::id(),
         ]);
 
         // Rattachement des factures à cet encaissement global
@@ -124,7 +178,7 @@ class EncaissementGlobalController extends Controller
      */
     public function show(EncaissementGlobal $encaissementsGlobaux)
     {
-        $eg = $encaissementsGlobaux->load('client', 'factures.ordreReparation', 'createdBy');
+        $eg = $encaissementsGlobaux->load('client', 'marqueGarantie', 'factures.ordreReparation', 'createdBy');
         return view('encaissements-globaux.show', compact('eg'));
     }
 
@@ -155,7 +209,7 @@ class EncaissementGlobalController extends Controller
         $eg->factures()->update([
             'statut'        => 'payee',
             'date_paiement' => $request->date_paiement,
-            'montant_paye'  => \DB::raw('montant_ttc'),  // montant_paye = montant_ttc pour chaque facture
+            'montant_paye' => DB::raw('montant_ttc'),  // montant_paye = montant_ttc pour chaque facture
         ]);
 
         return redirect()->route('encaissements-globaux.show', $eg)

@@ -28,6 +28,7 @@ class OrdreReparation extends Model
         // Identification et affectation
         'numero', 'client_id', 'vehicule_id', 'conseiller_id', 'technicien_id',
         'service', 'service_gratuit', 'date_affectation', 'chef_id',
+        'controle_qualite_technicien_id',
         // Statut et type
         'type', 'statut', 'statut_garantie', 'motif_refus_garantie', 'motif_approbation_garantie',
         // État du véhicule à l'entrée
@@ -75,6 +76,9 @@ class OrdreReparation extends Model
 
     /** Technicien affecté aux travaux (fiche seule, pas de compte de connexion — cf. Technicien) */
     public function technicien(): BelongsTo { return $this->belongsTo(Technicien::class, 'technicien_id'); }
+
+    /** Technicien ayant réalisé le contrôle qualité (repris sur la feuille de travail imprimée) */
+    public function controleQualitePar(): BelongsTo { return $this->belongsTo(Technicien::class, 'controle_qualite_technicien_id'); }
 
     /** Chef de garage qui a validé l'affectation */
     public function chef(): BelongsTo       { return $this->belongsTo(User::class, 'chef_id'); }
@@ -251,6 +255,29 @@ class OrdreReparation extends Model
     public function isAffecte(): bool
     {
         return $this->technicien_id !== null && $this->service !== null;
+    }
+
+    /**
+     * Catégories du dossier de preuves garantie (cf. PhotoOr::CATEGORIES) qui n'ont
+     * encore aucune photo — la vidéo du bruit ('video_bruit') est facultative et
+     * n'est jamais comptée comme manquante. Utilisé pour bloquer la facturation
+     * d'un OR garantie approuvé tant que le dossier n'est pas complet
+     * (cf. FactureController::store()).
+     */
+    public function categoriesGarantieManquantes(): array
+    {
+        $presentes = $this->photosOr->pluck('categorie')->filter()->unique();
+
+        return collect(PhotoOr::CATEGORIES)
+            ->except('video_bruit')
+            ->reject(fn ($label, $cle) => $presentes->contains($cle))
+            ->all();
+    }
+
+    /** Indique si le dossier de preuves garantie (hors vidéo, facultative) est complet */
+    public function documentsGarantieComplets(): bool
+    {
+        return empty($this->categoriesGarantieManquantes());
     }
 
     /** Retourne le libellé du niveau d'urgence */

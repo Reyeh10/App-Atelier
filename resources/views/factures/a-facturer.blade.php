@@ -27,7 +27,11 @@
             </thead>
             <tbody class="divide-y divide-gray-100">
                 @forelse($orsAFacturer as $or)
-                @php $devis = $or->allDevis->last(); @endphp
+                @php
+                    $devis = $or->allDevis->last();
+                    $estGarantieApprouvee = $or->type === 'garantie' && $or->statut_garantie === 'approuve';
+                    $categoriesManquantes = $estGarantieApprouvee ? $or->categoriesGarantieManquantes() : [];
+                @endphp
                 <tr class="hover:bg-gray-50">
                     <td class="px-5 py-3">
                         <a href="{{ route('ordres-reparations.show', $or) }}" class="font-mono text-orange-500 hover:underline text-xs">{{ $or->numero }}</a>
@@ -41,13 +45,21 @@
                         {{ $devis ? number_format($devis->montant_ttc, 0, ',', ' ') . ' FDJ' : '—' }}
                     </td>
                     <td class="px-5 py-3">
+                        @if(!empty($categoriesManquantes))
+                        <span class="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-700" title="Manque : {{ implode(', ', $categoriesManquantes) }}">⚠ Dossier garantie incomplet</span>
+                        @else
                         <span class="px-2 py-0.5 rounded-full text-xs font-bold bg-green-100 text-green-700">À facturer</span>
+                        @endif
                     </td>
                     <td class="px-5 py-3 text-right whitespace-nowrap">
+                        @if(!empty($categoriesManquantes))
+                        <span class="text-xs text-slate-400 font-medium px-4 py-1.5 inline-block" title="Il manque : {{ implode(', ', $categoriesManquantes) }}">Facturation bloquée</span>
+                        @else
                         <a href="{{ route('factures.create', $or) }}"
                            class="text-xs bg-green-500 hover:bg-green-600 text-white font-bold px-4 py-1.5 rounded-lg transition-colors">
                             Créer la facture
                         </a>
+                        @endif
                     </td>
                 </tr>
                 @empty

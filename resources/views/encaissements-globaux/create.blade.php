@@ -1,7 +1,7 @@
 @extends('layouts.app')
 @section('title', 'Nouvel encaissement groupé')
 @section('page-title', 'Encaissement groupé')
-@section('page-subtitle', $client ? $client->nom_complet : 'Sélectionner un client')
+@section('page-subtitle', $client ? $client->nom_complet : ($marqueGarantie ? $marqueGarantie->nom : 'Sélectionner un payeur'))
 
 @section('header-actions')
 <a href="{{ route('encaissements-globaux.index') }}"
@@ -23,37 +23,72 @@
 </div>
 @endif
 
-{{-- Étape 1 : choisir le client si pas encore sélectionné --}}
-@if(!$client)
-<div class="bg-white rounded-2xl border border-gray-200 p-6">
-    <h3 class="text-sm font-bold text-slate-700 uppercase tracking-wider mb-1">Sélectionner le client</h3>
-    <p class="text-xs text-slate-400 mb-4">Seuls les clients avec un compte crédit actif peuvent faire l'objet d'un encaissement groupé.</p>
+{{-- Étape 1 : choisir le payeur (client ou marque garantie) si pas encore sélectionné --}}
+@if(!$client && !$marqueGarantie)
+<div class="flex flex-col lg:flex-row gap-5">
 
-    @if($clients->isEmpty())
-    <div class="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-700">
-        Aucun client n'a de compte crédit actif. L'encaissement groupé est uniquement disponible pour les clients avec compte crédit.
-    </div>
-    @else
-    <form method="GET" action="{{ route('encaissements-globaux.create') }}" class="flex gap-3 items-end">
-        <div class="flex-1">
-            <label class="block text-xs font-medium text-slate-600 mb-1.5">Client avec compte crédit</label>
-            <select name="client_id" required
-                    class="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white">
-                <option value="">— Choisir un client —</option>
-                @foreach($clients as $c)
-                <option value="{{ $c->id }}">{{ $c->nom_complet }}
-                    @php $nb = \App\Models\Facture::where('client_id',$c->id)->where('statut','emise')->whereNull('encaissement_global_id')->count(); @endphp
-                    @if($nb) — {{ $nb }} facture{{ $nb>1?'s':'' }} en attente @endif
-                </option>
-                @endforeach
-            </select>
+    <div class="flex-1 bg-white rounded-2xl border border-gray-200 p-6">
+        <h3 class="text-sm font-bold text-slate-700 uppercase tracking-wider mb-1">Client à compte crédit</h3>
+        <p class="text-xs text-slate-400 mb-4">Seuls les clients avec un compte crédit actif peuvent faire l'objet d'un encaissement groupé.</p>
+
+        @if($clients->isEmpty())
+        <div class="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-700">
+            Aucun client n'a de compte crédit actif.
         </div>
-        <button type="submit"
-                class="bg-orange-500 hover:bg-orange-600 text-white font-bold text-sm px-6 py-2.5 rounded-xl transition-colors">
-            Continuer →
-        </button>
-    </form>
-    @endif
+        @else
+        <form method="GET" action="{{ route('encaissements-globaux.create') }}" class="flex gap-3 items-end">
+            <div class="flex-1">
+                <label class="block text-xs font-medium text-slate-600 mb-1.5">Client avec compte crédit</label>
+                <select name="client_id" required
+                        class="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white">
+                    <option value="">— Choisir un client —</option>
+                    @foreach($clients as $c)
+                    <option value="{{ $c->id }}">{{ $c->nom_complet }}
+                        @php $nb = \App\Models\Facture::where('client_id',$c->id)->whereNull('marque_garantie_id')->where('statut','emise')->whereNull('encaissement_global_id')->count(); @endphp
+                        @if($nb) — {{ $nb }} facture{{ $nb>1?'s':'' }} en attente @endif
+                    </option>
+                    @endforeach
+                </select>
+            </div>
+            <button type="submit"
+                    class="bg-orange-500 hover:bg-orange-600 text-white font-bold text-sm px-6 py-2.5 rounded-xl transition-colors">
+                Continuer →
+            </button>
+        </form>
+        @endif
+    </div>
+
+    <div class="flex-1 bg-white rounded-2xl border border-gray-200 p-6">
+        <h3 class="text-sm font-bold text-slate-700 uppercase tracking-wider mb-1">Marque garantie constructeur</h3>
+        <p class="text-xs text-slate-400 mb-4">Les factures des pannes couvertes par la garantie, elles aussi soumises à un plafond de crédit.</p>
+
+        @if($marques->isEmpty())
+        <div class="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-700">
+            Aucune marque garantie active. Configurez-en une dans Réglages atelier → Garantie constructeur.
+        </div>
+        @else
+        <form method="GET" action="{{ route('encaissements-globaux.create') }}" class="flex gap-3 items-end">
+            <div class="flex-1">
+                <label class="block text-xs font-medium text-slate-600 mb-1.5">Marque garantie</label>
+                <select name="marque_garantie_id" required
+                        class="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white">
+                    <option value="">— Choisir une marque —</option>
+                    @foreach($marques as $m)
+                    <option value="{{ $m->id }}">{{ $m->nom }}
+                        @php $nb = \App\Models\Facture::where('marque_garantie_id',$m->id)->where('statut','emise')->whereNull('encaissement_global_id')->count(); @endphp
+                        @if($nb) — {{ $nb }} facture{{ $nb>1?'s':'' }} en attente @endif
+                    </option>
+                    @endforeach
+                </select>
+            </div>
+            <button type="submit"
+                    class="bg-orange-500 hover:bg-orange-600 text-white font-bold text-sm px-6 py-2.5 rounded-xl transition-colors">
+                Continuer →
+            </button>
+        </form>
+        @endif
+    </div>
+
 </div>
 
 @else
@@ -61,16 +96,25 @@
 {{-- Étape 2 : sélectionner les factures --}}
 <form method="POST" action="{{ route('encaissements-globaux.store') }}" id="form-eg">
 @csrf
+@if($client)
 <input type="hidden" name="client_id" value="{{ $client->id }}">
+@else
+<input type="hidden" name="marque_garantie_id" value="{{ $marqueGarantie->id }}">
+@endif
 
 <div class="bg-white rounded-2xl border border-gray-200 p-6">
     <div class="flex items-center justify-between mb-4">
         <div>
+            @if($client)
             <h3 class="font-bold text-slate-800">{{ $client->nom_complet }}</h3>
             <p class="text-xs text-slate-500 mt-0.5">{{ $client->getTypeLabel() }} — {{ $client->telephone }}</p>
+            @else
+            <h3 class="font-bold text-slate-800">{{ $marqueGarantie->nom }} <span class="text-xs font-semibold text-indigo-600 bg-indigo-50 rounded px-1.5 py-0.5">Garantie constructeur</span></h3>
+            <p class="text-xs text-slate-500 mt-0.5">Plafond {{ number_format($marqueGarantie->plafond_credit, 0, ',', ' ') }} FDJ — disponible {{ number_format($marqueGarantie->disponible, 0, ',', ' ') }} FDJ</p>
+            @endif
         </div>
         <a href="{{ route('encaissements-globaux.create') }}"
-           class="text-xs text-orange-500 hover:underline">Changer de client</a>
+           class="text-xs text-orange-500 hover:underline">Changer de {{ $client ? 'client' : 'marque' }}</a>
     </div>
 
     {{-- Mode de paiement --}}
@@ -78,8 +122,12 @@
         <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Mode de paiement</label>
         <div class="flex flex-wrap gap-2">
             @php
-            $modes = ['especes' => 'Espèces', 'cheque' => 'Chèque', 'carte' => 'Carte', 'virement' => 'Virement', 'compte' => 'Compte société'];
-            $defaultMode = in_array($client->type, ['societe','assurance']) ? 'compte' : 'especes';
+            $modes = $client
+                ? ['especes' => 'Espèces', 'cheque' => 'Chèque', 'carte' => 'Carte', 'virement' => 'Virement', 'compte' => 'Compte société']
+                : ['virement' => 'Virement', 'cheque' => 'Chèque', 'especes' => 'Espèces'];
+            $defaultMode = $client
+                ? (in_array($client->type, ['societe','assurance']) ? 'compte' : 'especes')
+                : 'virement';
             @endphp
             <input type="hidden" name="mode_paiement" id="mode_val" value="{{ $defaultMode }}">
             @foreach($modes as $val => $label)
@@ -103,7 +151,7 @@
 
     @if($facturesDisponibles->isEmpty())
     <div class="px-6 py-10 text-center text-slate-400 text-sm">
-        Ce client n'a aucune facture émise en attente de paiement.
+        {{ $client ? 'Ce client' : 'Cette marque' }} n'a aucune facture émise en attente de paiement.
     </div>
     @else
     <div class="divide-y divide-gray-100">

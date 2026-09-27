@@ -11,7 +11,7 @@ class EncaissementGlobal extends Model
     protected $table = 'encaissements_globaux';
 
     protected $fillable = [
-        'numero', 'client_id', 'montant_total', 'statut',
+        'numero', 'client_id', 'marque_garantie_id', 'montant_total', 'statut',
         'mode_paiement', 'date_emission', 'date_paiement',
         'notes', 'created_by_id',
     ];
@@ -25,6 +25,20 @@ class EncaissementGlobal extends Model
     public function client(): BelongsTo
     {
         return $this->belongsTo(Client::class);
+    }
+
+    /** Compte garantie constructeur regroupé (renseigné uniquement si ce n'est pas un client) */
+    public function marqueGarantie(): BelongsTo
+    {
+        return $this->belongsTo(MarqueGarantie::class);
+    }
+
+    /** Nom de l'entité qui règle réellement cet encaissement (marque garantie, sinon le client) */
+    public function getPayeurNomAttribute(): string
+    {
+        return $this->marque_garantie_id
+            ? $this->marqueGarantie->nom . ' (garantie constructeur)'
+            : $this->client->nom_complet;
     }
 
     public function factures(): HasMany

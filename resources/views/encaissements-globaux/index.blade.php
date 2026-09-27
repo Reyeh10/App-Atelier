@@ -1,7 +1,7 @@
 @extends('layouts.app')
 @section('title', 'Encaissements groupés')
 @section('page-title', 'Encaissements groupés')
-@section('page-subtitle', 'Regroupement de factures par client')
+@section('page-subtitle', 'Regroupement de factures par client ou par marque garantie')
 
 @section('header-actions')
 @if(auth()->user()->hasPermission('encaisser_factures'))
@@ -26,7 +26,7 @@
             <thead>
                 <tr class="border-b border-gray-200 bg-gray-50">
                     <th class="px-5 py-3 text-left text-xs font-semibold text-slate-500">Numéro</th>
-                    <th class="px-5 py-3 text-left text-xs font-semibold text-slate-500">Client</th>
+                    <th class="px-5 py-3 text-left text-xs font-semibold text-slate-500">Payeur</th>
                     <th class="px-5 py-3 text-left text-xs font-semibold text-slate-500">Date</th>
                     <th class="px-5 py-3 text-left text-xs font-semibold text-slate-500">Mode</th>
                     <th class="px-5 py-3 text-center text-xs font-semibold text-slate-500">Factures</th>
@@ -39,7 +39,12 @@
                 @forelse($encaissements as $eg)
                 <tr class="hover:bg-gray-50">
                     <td class="px-5 py-3 font-mono font-semibold text-slate-800">{{ $eg->numero }}</td>
-                    <td class="px-5 py-3 text-slate-700 font-medium">{{ $eg->client->nom_complet }}</td>
+                    <td class="px-5 py-3 text-slate-700 font-medium">
+                        {{ $eg->payeur_nom }}
+                        @if($eg->marque_garantie_id)
+                        <span class="ml-1 text-xs bg-indigo-100 text-indigo-700 font-semibold px-1.5 py-0.5 rounded">Garantie</span>
+                        @endif
+                    </td>
                     <td class="px-5 py-3 text-slate-500">{{ $eg->date_emission->format('d/m/Y') }}</td>
                     <td class="px-5 py-3 text-slate-500">{{ $eg->getModePaiementLabel() }}</td>
                     <td class="px-5 py-3 text-center">

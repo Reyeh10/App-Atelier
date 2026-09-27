@@ -96,10 +96,23 @@ class Facture extends Model
      * Génère un numéro de facture séquentiel au format XXXX/GARA/AAAA.
      * Exemple : 0001/GARA/2026, 0002/GARA/2026...
      */
+    /**
+     * Numéro séquentiel qui repart à 1 à chaque nouvelle année (ex: 1/GARA/2027
+     * au premier janvier). Le prochain numéro est calculé à partir du plus
+     * grand déjà utilisé cette année (et non d'un simple comptage) pour ne
+     * jamais produire de doublon si un numéro venait à manquer dans la
+     * séquence — même logique que Devis::genererNumero().
+     */
     public static function genererNumero(): string
     {
-        $annee = now()->year;
-        $seq   = self::whereYear('created_at', $annee)->count() + 1;
+        $annee      = now()->year;
+        $dernierSeq = self::whereYear('created_at', $annee)
+            ->get(['numero'])
+            ->map(fn ($f) => (int) explode('/', $f->numero)[0])
+            ->max();
+
+        $seq = ($dernierSeq ?? 0) + 1;
+
         return sprintf('%d/GARA/%d', $seq, $annee);
     }
 

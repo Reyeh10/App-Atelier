@@ -1,7 +1,7 @@
 @extends('layouts.app')
 @section('title', $eg->numero)
 @section('page-title', $eg->numero)
-@section('page-subtitle', $eg->client->nom_complet)
+@section('page-subtitle', $eg->payeur_nom)
 
 @section('header-actions')
 <a href="{{ route('encaissements-globaux.index') }}"

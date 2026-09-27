@@ -193,7 +193,9 @@ Route::middleware('auth')->group(function () {
 
     Route::middleware('perm:gerer_ordres')->group(function () {
         Route::post('/ordres-reparations/{ordresReparation}/photos',           [OrdreReparationController::class, 'uploadPhotos'])->name('ordres-reparations.photos.upload');
+        Route::post('/ordres-reparations/{ordresReparation}/video-garantie',   [OrdreReparationController::class, 'uploadVideoGarantie'])->name('ordres-reparations.video-garantie.upload');
         Route::delete('/ordres-reparations/{ordresReparation}/photos/{photo}', [OrdreReparationController::class, 'supprimerPhoto'])->name('ordres-reparations.photos.supprimer');
+        Route::get('/ordres-reparations/{ordresReparation}/photos/telecharger', [OrdreReparationController::class, 'telechargerPhotos'])->name('ordres-reparations.photos.telecharger');
     });
 
     // ── Devis ─────────────────────────────────────────────────
@@ -293,6 +295,7 @@ Route::middleware('auth')->group(function () {
         Route::patch('/parametres',                                  [ParametreAtelierController::class, 'update'])->name('parametres.update');
         Route::patch('/parametres/capacite',                         [ParametreAtelierController::class, 'updateCapacite'])->name('parametres.capacite.update');
         Route::patch('/parametres/tarifs',                           [ParametreAtelierController::class, 'updateTarifs'])->name('parametres.tarifs.update');
+        Route::patch('/parametres/controle-qualite',                 [ParametreAtelierController::class, 'updateControleQualiteTechnicien'])->name('parametres.controle-qualite.update');
         Route::post('/parametres/pauses',                            [ParametreAtelierController::class, 'storePause'])->name('parametres.pauses.store');
         Route::patch('/parametres/pauses/{pause}/toggle',            [ParametreAtelierController::class, 'togglePause'])->name('parametres.pauses.toggle');
         Route::delete('/parametres/pauses/{pause}',                  [ParametreAtelierController::class, 'destroyPause'])->name('parametres.pauses.destroy');
