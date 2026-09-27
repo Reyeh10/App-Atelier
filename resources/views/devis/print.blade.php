@@ -313,7 +313,7 @@
                 <td class="tc">{{ $devis->created_at->format('d/m/Y') }}</td>
                 <td></td>
                 <td>{{ $l->designation }}</td>
-                <td class="tc">{{ $l->quantite > 0 ? number_format($l->quantite, 0, ',', ' ') : '' }}</td>
+                <td class="tc">{{ $l->quantite > 0 ? rtrim(rtrim(number_format($l->quantite, 2, ',', ''), '0'), ',') : '' }}</td>
                 <td class="tc">{{ $l->quantite > 0 ? 'H' : '' }}</td>
                 <td class="tr">{{ $l->prix_unitaire > 0 ? number_format($l->prix_unitaire, 0, ',', ' ') : '' }}</td>
                 @if($hasRemise)

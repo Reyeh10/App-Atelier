@@ -248,7 +248,7 @@
                 <td style="font-size:8pt;color:#555;">{{ $dateFacture }}</td>
                 <td></td>
                 <td style="font-weight:600;">{{ $l->designation }}</td>
-                <td class="c">{{ $l->quantite > 0 ? number_format($l->quantite, 0) : '' }}</td>
+                <td class="c">{{ $l->quantite > 0 ? rtrim(rtrim(number_format($l->quantite, 2, ',', ''), '0'), ',') : '' }}</td>
                 <td class="c" style="font-size:8.5pt;">{{ $l->unite ?: ($l->type === 'main_oeuvre' ? 'H' : '') }}</td>
                 <td class="r">{{ $l->prix_unitaire > 0 ? number_format($l->prix_unitaire, 0, ',', ' ') : '' }}</td>
                 @if($hasRemiseF)

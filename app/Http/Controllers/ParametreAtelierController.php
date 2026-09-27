@@ -7,6 +7,7 @@ use App\Models\MarqueGarantie;
 use App\Models\ParametreAtelier;
 use App\Models\PauseAtelier;
 use App\Models\ServiceRapide;
+use App\Models\Technicien;
 use Illuminate\Http\Request;
 
 class ParametreAtelierController extends Controller
@@ -21,6 +22,7 @@ class ParametreAtelierController extends Controller
         $parametreAtelier = ParametreAtelier::get();
         $marquesGarantie  = MarqueGarantie::orderBy('nom')->get();
         $servicesRapides  = ServiceRapide::orderBy('nom')->get();
+        $techniciens      = Technicien::where('actif', true)->orderBy('nom')->get();
 
         return view('parametres.index', [
             'horaires'         => $horaires,
@@ -29,7 +31,28 @@ class ParametreAtelierController extends Controller
             'parametreAtelier' => $parametreAtelier,
             'marquesGarantie'  => $marquesGarantie,
             'servicesRapides'  => $servicesRapides,
+            'techniciens'      => $techniciens,
         ]);
+    }
+
+    /**
+     * Désigne le technicien responsable qualité fixe — appliqué automatiquement
+     * à la validation du contrôle qualité de tous les OR, sans avoir à le
+     * choisir à chaque fois (cf. OrdreReparationController::validerQualite()).
+     */
+    public function updateControleQualiteTechnicien(Request $request)
+    {
+        $data = $request->validate([
+            'controle_qualite_technicien_id' => ['required', 'exists:techniciens,id'],
+        ], [
+            'controle_qualite_technicien_id.required' => 'Veuillez choisir le responsable qualité.',
+            'controle_qualite_technicien_id.exists'   => 'Le technicien sélectionné est introuvable.',
+        ]);
+
+        ParametreAtelier::get()->update($data);
+
+        $nom = Technicien::find($data['controle_qualite_technicien_id'])->name;
+        return back()->with('success', "Responsable qualité défini : {$nom}.");
     }
 
     /**

@@ -199,7 +199,7 @@
                         {{ $ligne->reference ?: '—' }}
                     </td>
                     <td class="px-5 py-3 text-right text-slate-600">
-                        {{ number_format($ligne->quantite, 0, ',', ' ') }}
+                        {{ $ligne->type === 'main_oeuvre' ? rtrim(rtrim(number_format($ligne->quantite, 2, ',', ''), '0'), ',') : number_format($ligne->quantite, 0, ',', ' ') }}
                         @if($ligne->type === 'main_oeuvre')
                             <span class="text-xs text-blue-500">h</span>
                         @endif

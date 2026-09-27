@@ -386,6 +386,39 @@ $nomsJours = [
 
     </div>
 
+    {{-- ── Responsable qualité fixe ──────────────────────────────── --}}
+    <div class="mt-6 bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-700 overflow-hidden max-w-xl">
+        <div class="px-6 py-4 border-b border-gray-100 dark:border-slate-700 flex items-center gap-3">
+            <div class="w-9 h-9 rounded-xl bg-pink-50 dark:bg-slate-700 flex items-center justify-center flex-shrink-0">
+                <svg class="w-5 h-5" style="color:#db2777" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+            </div>
+            <div>
+                <h2 class="font-semibold text-slate-800 dark:text-slate-100">Responsable qualité</h2>
+                <p class="text-xs text-slate-500 dark:text-slate-400">Technicien fixe appliqué automatiquement à la validation du contrôle qualité de tous les OR — son nom apparaît sur la feuille de travail imprimée, sans redemander à chaque fois</p>
+            </div>
+        </div>
+
+        <form method="POST" action="{{ route('parametres.controle-qualite.update') }}" class="px-6 py-4 flex gap-3 items-end">
+            @csrf @method('PATCH')
+            <div class="flex-1">
+                <label class="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Technicien responsable qualité</label>
+                <select name="controle_qualite_technicien_id" required
+                        class="w-full px-3 py-2.5 border border-gray-300 dark:border-slate-600 rounded-xl text-sm
+                               bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <option value="">— Choisir —</option>
+                    @foreach($techniciens as $tech)
+                    <option value="{{ $tech->id }}" {{ $parametreAtelier->controle_qualite_technicien_id == $tech->id ? 'selected' : '' }}>{{ $tech->name }}</option>
+                    @endforeach
+                </select>
+            </div>
+            <button type="submit" class="px-6 py-2.5 bg-pink-500 hover:bg-pink-600 text-white text-sm font-semibold rounded-xl transition-colors">
+                Enregistrer
+            </button>
+        </form>
+    </div>
+
     {{-- ── Catalogue Services Rapides ("Autre") ──────────────────── --}}
     <div class="mt-6 bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-700 overflow-hidden">
         <div class="px-6 py-4 border-b border-gray-100 dark:border-slate-700 flex items-center gap-3">

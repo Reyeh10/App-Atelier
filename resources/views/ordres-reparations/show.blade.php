@@ -247,6 +247,13 @@
     </div>
 
     {{-- Devis --}}
+    @php
+        // Tant que la garantie est en attente de décision, pas de devis possible.
+        // Une fois approuvée ou refusée, un devis reste à établir comme pour un OR
+        // normal — seul le payeur final change (cf. bandeau ci-dessous).
+        $garantieEnAttente = $or->type === 'garantie' && $or->statut_garantie === 'en_attente';
+        $marqueGarantie = ($or->statut_garantie === 'approuve') ? \App\Models\MarqueGarantie::pourMarque($or->vehicule->marque) : null;
+    @endphp
     <div class="bg-white rounded-2xl border-2 {{ $or->devis ? 'border-' . $or->devis->getStatutColor() . '-300' : 'border-gray-200' }} p-6">
         <div class="flex items-center justify-between mb-3">
             <h3 class="font-semibold text-slate-800 flex items-center gap-2">
@@ -258,12 +265,12 @@
                 <span class="text-xs text-slate-400 font-normal">({{ $or->allDevis->count() }})</span>
                 @endif
             </h3>
-            @if(!$or->devis && $or->type !== 'garantie' && auth()->user()->hasPermission('gerer_devis'))
+            @if(!$or->devis && !$garantieEnAttente && auth()->user()->hasPermission('gerer_devis'))
             <a href="{{ route('devis.create', $or) }}"
                class="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-2 rounded-xl transition-colors">
                 + Créer un devis
             </a>
-            @elseif($or->devis && $or->devis->statut === 'accepte' && $or->type !== 'garantie' && auth()->user()->hasPermission('gerer_devis'))
+            @elseif($or->devis && $or->devis->statut === 'accepte' && !$garantieEnAttente && auth()->user()->hasPermission('gerer_devis'))
             <a href="{{ route('devis.create', $or) }}"
                class="bg-indigo-500 hover:bg-indigo-600 text-white text-xs font-bold px-4 py-2 rounded-xl transition-colors">
                 + Devis complémentaire
@@ -271,9 +278,19 @@
             @endif
         </div>
 
+        @if($or->statut_garantie === 'approuve')
+        <p class="text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-xl px-3 py-2 mb-3">
+            Garantie approuvée — ce devis sera facturé à la garantie constructeur{{ $marqueGarantie ? " ({$marqueGarantie->nom})" : '' }}, pas au client.
+        </p>
+        @elseif($or->statut_garantie === 'refuse')
+        <p class="text-xs font-medium text-slate-600 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 mb-3">
+            Garantie refusée — ce devis sera facturé au client, comme un OR normal.
+        </p>
+        @endif
+
         @if($or->allDevis->isEmpty())
-        @if($or->type === 'garantie')
-        <p class="text-sm text-slate-400 bg-gray-50 rounded-xl p-3">Panne en cours d'instruction par l'équipe garantie — pas de devis client tant que la garantie n'est pas refusée (voir module Garantie ci-dessous).</p>
+        @if($garantieEnAttente)
+        <p class="text-sm text-slate-400 bg-gray-50 rounded-xl p-3">Panne en cours d'instruction par l'équipe garantie — pas de devis tant que la décision n'est pas prise (voir module Garantie ci-dessous).</p>
         @else
         <p class="text-sm text-slate-400 bg-gray-50 rounded-xl p-3">Aucun devis créé — créez un devis après le diagnostic.</p>
         @endif
@@ -508,12 +525,20 @@
             <span class="w-3 h-3 rounded-full bg-pink-500 inline-block"></span> Contrôle qualité
         </h3>
         <p class="text-sm text-slate-500 mb-4">Vérifier les travaux effectués avant de passer au lavage.</p>
+        @php $responsableQualite = \App\Models\ParametreAtelier::get()->controleQualiteTechnicien; @endphp
+        @if($responsableQualite)
+        <p class="text-xs text-slate-400 mb-2">Responsable qualité : <span class="font-semibold text-slate-600">{{ $responsableQualite->name }}</span> (défini dans Réglages atelier)</p>
         <form method="POST" action="{{ route('ordres-reparations.valider-qualite', $or) }}">
             @csrf @method('PATCH')
             <button type="submit" class="w-full bg-pink-500 hover:bg-pink-600 text-white font-bold py-2.5 rounded-xl text-sm transition-colors">
                 ✓ Contrôle qualité validé → Lavage
             </button>
         </form>
+        @else
+        <p class="text-xs text-amber-600 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
+            Aucun responsable qualité configuré — <a href="{{ route('parametres.index') }}" class="underline font-medium">définissez-le dans Réglages atelier</a> avant de valider.
+        </p>
+        @endif
         @else
         <h3 class="font-semibold text-slate-800 mb-3 flex items-center gap-2">
             <span class="w-3 h-3 rounded-full bg-blue-500 inline-block"></span> Lavage en cours
@@ -561,19 +586,21 @@
         </div>
         @endif
 
-        {{-- Photos du véhicule --}}
-        @if($or->photosOr->count() > 0 || auth()->user()->hasPermission('gerer_ordres'))
+        {{-- Photos du véhicule (réception/restitution — le dossier de preuves garantie
+             constructeur, catégorisé, est affiché séparément plus bas). --}}
+        @php $photosGeneriques = $or->photosOr->whereNull('categorie'); @endphp
+        @if($photosGeneriques->count() > 0 || auth()->user()->hasPermission('gerer_ordres'))
         <div class="mt-4 border-t border-gray-100 pt-4">
             <div class="flex items-center justify-between mb-3">
                 <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Photos du véhicule</p>
-                @if($or->photosOr->count() > 0)
-                <span class="text-xs text-slate-400">{{ $or->photosOr->count() }} photo(s)</span>
+                @if($photosGeneriques->count() > 0)
+                <span class="text-xs text-slate-400">{{ $photosGeneriques->count() }} photo(s)</span>
                 @endif
             </div>
 
-            @if($or->photosOr->count() > 0)
+            @if($photosGeneriques->count() > 0)
             <div class="grid grid-cols-3 gap-2 mb-3">
-                @foreach($or->photosOr as $photo)
+                @foreach($photosGeneriques as $photo)
                 <div class="relative group">
                     <a href="{{ $photo->url() }}" target="_blank">
                         <img src="{{ $photo->url() }}" alt="Photo véhicule"
@@ -701,6 +728,7 @@
         <div class="bg-green-50 border border-green-200 rounded-xl p-4">
             <p class="text-sm text-green-800 font-medium">✓ Garantie approuvée</p>
             @if($or->motif_approbation_garantie)<p class="text-xs text-green-600 mt-1">{{ $or->motif_approbation_garantie }}</p>@endif
+            @if($or->allDevis->isEmpty())<p class="text-xs text-green-700 mt-2">→ Créez le devis (facturé à la garantie constructeur) dans le bloc « Devis » ci-dessus.</p>@endif
         </div>
         @elseif($or->statut_garantie === 'refuse')
         <div class="bg-red-50 border border-red-200 rounded-xl p-4">
@@ -708,6 +736,109 @@
             @if($or->motif_refus_garantie)<p class="text-xs text-red-600 mt-1">{{ $or->motif_refus_garantie }}</p>@endif
         </div>
         @endif
+    </div>
+    @endif
+
+    {{-- Dossier de preuves garantie constructeur : photos VIN / tableau de bord / pièce
+         endommagée / pièce neuve / référence pièce + vidéo du bruit — constitué dès la prise
+         en charge (avant même la décision), pour appuyer la réclamation auprès de la marque. --}}
+    @if($or->type === 'garantie' || $or->statut_garantie !== null)
+    @php
+        $photosGarantie = $or->photosOr->whereNotNull('categorie');
+        $categoriesManquantes = $or->categoriesGarantieManquantes();
+    @endphp
+    <div class="bg-white rounded-2xl border-2 border-gray-200 p-6">
+        <div class="flex items-center justify-between mb-3">
+            <h3 class="font-semibold text-slate-800 flex items-center gap-2">
+                <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/>
+                </svg>
+                Dossier de preuves garantie
+            </h3>
+            @if($photosGarantie->isNotEmpty())
+            <a href="{{ route('ordres-reparations.photos.telecharger', $or) }}"
+               class="text-xs text-slate-500 hover:text-slate-800 border border-gray-200 rounded-lg px-3 py-1.5 transition-colors">
+                ⬇ Tout télécharger (.zip)
+            </a>
+            @endif
+        </div>
+        <p class="text-xs text-slate-400 mb-4">Photos et vidéo justifiant la réclamation auprès de la marque — à joindre au dossier transmis au constructeur. Toutes les catégories sont obligatoires avant facturation, sauf la vidéo du bruit (facultative).</p>
+
+        @if($or->statut_garantie === 'approuve')
+        @if(empty($categoriesManquantes))
+        <div class="bg-green-50 border border-green-200 rounded-xl px-3 py-2 mb-4 text-xs font-medium text-green-700">
+            ✓ Dossier complet — le véhicule peut être facturé.
+        </div>
+        @else
+        <div class="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 mb-4 text-xs font-medium text-amber-700">
+            ⚠ Dossier incomplet — il manque : {{ implode(', ', $categoriesManquantes) }}. La facturation restera bloquée tant que ces photos ne sont pas ajoutées.
+        </div>
+        @endif
+        @endif
+
+        <div class="grid grid-cols-2 gap-4">
+            @foreach(\App\Models\PhotoOr::CATEGORIES as $cle => $label)
+            @php $items = $photosGarantie->where('categorie', $cle); @endphp
+            <div class="border {{ $items->isEmpty() && $cle !== 'video_bruit' ? 'border-amber-200' : 'border-gray-100' }} rounded-xl p-3">
+                <div class="flex items-center justify-between mb-2">
+                    <p class="text-xs font-semibold text-slate-600">{{ $label }}</p>
+                    @if($cle === 'video_bruit')
+                    <span class="text-[10px] font-bold text-slate-400 bg-gray-100 rounded-full px-2 py-0.5">Facultative</span>
+                    @elseif($items->isNotEmpty())
+                    <span class="text-[10px] font-bold text-green-600 bg-green-50 rounded-full px-2 py-0.5">✓ Ok</span>
+                    @else
+                    <span class="text-[10px] font-bold text-amber-600 bg-amber-50 rounded-full px-2 py-0.5">Obligatoire</span>
+                    @endif
+                </div>
+
+                @if($items->isNotEmpty())
+                <div class="grid grid-cols-3 gap-1.5 mb-2">
+                    @foreach($items as $photo)
+                    <div class="relative group">
+                        @if($photo->estVideo())
+                        <a href="{{ $photo->url() }}" target="_blank" class="flex items-center justify-center w-full h-16 bg-slate-800 rounded-lg text-white text-xl">▶</a>
+                        @else
+                        <a href="{{ $photo->url() }}" target="_blank">
+                            <img src="{{ $photo->url() }}" alt="{{ $label }}" class="w-full h-16 object-cover rounded-lg border border-gray-200 hover:opacity-90 transition-opacity">
+                        </a>
+                        @endif
+                        @if(auth()->user()->hasPermission('gerer_ordres'))
+                        <form method="POST" action="{{ route('ordres-reparations.photos.supprimer', [$or, $photo]) }}"
+                              class="absolute top-1 right-1 hidden group-hover:block"
+                              onsubmit="return confirm('Supprimer ce fichier ?')">
+                            @csrf @method('DELETE')
+                            <button type="submit" class="w-4 h-4 bg-red-500 hover:bg-red-600 text-white rounded-full text-[10px] font-bold flex items-center justify-center">×</button>
+                        </form>
+                        @endif
+                    </div>
+                    @endforeach
+                </div>
+                @else
+                <p class="text-[11px] text-slate-300 italic mb-2">Aucun fichier.</p>
+                @endif
+
+                @if(auth()->user()->hasPermission('gerer_ordres'))
+                @if($cle === 'video_bruit')
+                <form method="POST" action="{{ route('ordres-reparations.video-garantie.upload', $or) }}" enctype="multipart/form-data" class="flex gap-1.5">
+                    @csrf
+                    <input type="file" name="video_bruit" accept="video/mp4,video/quicktime,video/webm" required
+                           class="flex-1 min-w-0 text-[11px] text-slate-500 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-orange-50 file:text-orange-600 hover:file:bg-orange-100">
+                    <button type="submit" class="flex-shrink-0 bg-orange-500 hover:bg-orange-600 text-white text-[11px] font-bold px-2.5 py-1.5 rounded-lg transition-colors">Ajouter</button>
+                </form>
+                @else
+                <form method="POST" action="{{ route('ordres-reparations.photos.upload', $or) }}" enctype="multipart/form-data" class="flex gap-1.5">
+                    @csrf
+                    <input type="hidden" name="categorie" value="{{ $cle }}">
+                    <input type="file" name="photos_vehicule[]" multiple accept="image/jpeg,image/png,image/webp" required
+                           class="flex-1 min-w-0 text-[11px] text-slate-500 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-orange-50 file:text-orange-600 hover:file:bg-orange-100">
+                    <button type="submit" class="flex-shrink-0 bg-orange-500 hover:bg-orange-600 text-white text-[11px] font-bold px-2.5 py-1.5 rounded-lg transition-colors">Ajouter</button>
+                </form>
+                @endif
+                @endif
+            </div>
+            @endforeach
+        </div>
     </div>
     @endif
 
@@ -755,10 +886,11 @@
         <a href="{{ route('vehicules.show', $or->vehicule) }}" class="block mt-3 text-xs text-orange-500 hover:underline">Voir la fiche véhicule →</a>
     </div>
 
-    {{-- Affectation technicien — pas d'affectation tant que l'OR est de type garantie : la prise
-         en charge est gérée par l'équipe garantie. Si la garantie est refusée, l'OR redevient
-         "normal" (cf. changerStatutGarantie) et l'affectation redevient possible normalement. --}}
-    @if(auth()->user()->canManageWorkshop() && $or->type !== 'garantie')
+    {{-- Affectation technicien — pas d'affectation tant que la garantie est en attente de
+         décision : la prise en charge est gérée par l'équipe garantie. Une fois approuvée
+         (devis accepté, facturé ensuite à la marque) ou refusée (redevient "normal", cf.
+         changerStatutGarantie), l'affectation suit le parcours standard. --}}
+    @if(auth()->user()->canManageWorkshop() && ! ($or->type === 'garantie' && $or->statut_garantie !== 'approuve'))
     @php
         $bcBloquant = $or->bonsCommande()->whereIn('statut', ['en_attente', 'commande'])->first();
     @endphp
@@ -823,7 +955,7 @@
         </form>
         @endif
     </div>
-    @elseif($or->technicien && $or->type !== 'garantie')
+    @elseif($or->technicien && ! ($or->type === 'garantie' && $or->statut_garantie !== 'approuve'))
     <div class="bg-white rounded-2xl border border-gray-200 p-5">
         <h3 class="text-sm font-semibold text-slate-700 mb-3">Technicien assigné</h3>
         <div class="flex items-center gap-3">

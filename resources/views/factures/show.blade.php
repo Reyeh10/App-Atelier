@@ -196,7 +196,10 @@
                 <tr>
                     <td class="px-5 py-3"><span class="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">{{ $ligne->getTypeLabel() }}</span></td>
                     <td class="px-5 py-3 text-slate-700">{{ $ligne->designation }}</td>
-                    <td class="px-5 py-3 text-right text-slate-600">{{ $ligne->quantite }}</td>
+                    <td class="px-5 py-3 text-right text-slate-600">
+                        {{ $ligne->type === 'main_oeuvre' ? rtrim(rtrim(number_format($ligne->quantite, 2, ',', ''), '0'), ',') : number_format($ligne->quantite, 0, ',', ' ') }}
+                        @if($ligne->type === 'main_oeuvre')<span class="text-xs text-blue-500">h</span>@endif
+                    </td>
                     <td class="px-5 py-3 text-right text-slate-600">{{ number_format($ligne->prix_unitaire, 0, ',', ' ') }} FDJ</td>
                     <td class="px-5 py-3 text-right text-slate-500">{{ $ligne->remise > 0 ? $ligne->remise . '%' : '—' }}</td>
                     <td class="px-5 py-3 text-right font-semibold text-slate-800">{{ number_format($ligne->total_ht, 0, ',', ' ') }} FDJ</td>

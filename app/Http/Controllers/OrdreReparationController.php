@@ -257,19 +257,23 @@ class OrdreReparationController extends Controller
      */
     public function show(OrdreReparation $ordresReparation)
     {
-        $ordresReparation->load(['client', 'vehicule.typeMoteur', 'conseiller', 'technicien', 'chef', 'photos', 'photosOr', 'devis', 'allDevis.lignes', 'facture', 'dossier.reservation']);
+        $ordresReparation->load(['client', 'vehicule.typeMoteur', 'conseiller', 'technicien', 'chef', 'controleQualitePar', 'photos', 'photosOr', 'devis', 'allDevis.lignes', 'facture', 'dossier.reservation']);
         return view('ordres-reparations.show', ['or' => $ordresReparation]);
     }
 
     /**
      * Ajoute des photos à un OR déjà existant (depuis la fiche OR).
      * Chaque photo est stockée dans le dossier public/photos-or/{id}.
+     * Si `categorie` est fournie (VIN, tableau de bord, pièce endommagée...),
+     * les photos rejoignent le dossier de preuves garantie constructeur
+     * (cf. PhotoOr::CATEGORIES) plutôt que les photos génériques du véhicule.
      */
     public function uploadPhotos(Request $request, OrdreReparation $ordresReparation)
     {
         $request->validate([
             'photos_vehicule'   => ['required', 'array', 'max:10'],
             'photos_vehicule.*' => ['file', 'mimes:jpg,jpeg,png,webp', 'max:8192'],
+            'categorie'         => ['nullable', 'string', 'in:' . implode(',', array_keys(PhotoOr::CATEGORIES))],
         ], [
             'photos_vehicule.required'   => 'Veuillez sélectionner au moins une photo.',
             'photos_vehicule.*.mimes'    => 'Les photos doivent être au format JPG, PNG ou WEBP.',
@@ -283,6 +287,8 @@ class OrdreReparationController extends Controller
                 'chemin'       => $path,
                 'nom_original' => $file->getClientOriginalName(),
                 'taille'       => $file->getSize(),
+                'categorie'    => $request->categorie,
+                'type'         => 'photo',
             ]);
         }
 
@@ -290,7 +296,37 @@ class OrdreReparationController extends Controller
     }
 
     /**
-     * Supprime une photo liée à un OR.
+     * Ajoute la vidéo du bruit/panne au dossier de preuves garantie
+     * constructeur d'un OR (cf. PhotoOr::CATEGORIES — catégorie fixe
+     * 'video_bruit', une seule vidéo attendue mais rien n'empêche d'en
+     * réenvoyer une seconde, l'ancienne reste consultable).
+     */
+    public function uploadVideoGarantie(Request $request, OrdreReparation $ordresReparation)
+    {
+        $request->validate([
+            'video_bruit' => ['required', 'file', 'mimetypes:video/mp4,video/quicktime,video/webm,video/3gpp', 'max:51200'],
+        ], [
+            'video_bruit.required'  => 'Veuillez sélectionner une vidéo.',
+            'video_bruit.mimetypes' => 'La vidéo doit être au format MP4, MOV ou WEBM.',
+            'video_bruit.max'       => 'La vidéo ne doit pas dépasser 50 Mo.',
+        ]);
+
+        $file = $request->file('video_bruit');
+        $path = $file->store("photos-or/{$ordresReparation->id}", 'public');
+        PhotoOr::create([
+            'or_id'        => $ordresReparation->id,
+            'chemin'       => $path,
+            'nom_original' => $file->getClientOriginalName(),
+            'taille'       => $file->getSize(),
+            'categorie'    => 'video_bruit',
+            'type'         => 'video',
+        ]);
+
+        return back()->with('success', 'Vidéo ajoutée.');
+    }
+
+    /**
+     * Supprime une photo (ou vidéo) liée à un OR.
      * Vérifie que la photo appartient bien à cet OR avant de supprimer
      * le fichier physique du disque et l'entrée en base.
      */
@@ -303,6 +339,49 @@ class OrdreReparationController extends Controller
         $photo->delete();
 
         return back()->with('success', 'Photo supprimée.');
+    }
+
+    /**
+     * Télécharge en une seule archive .zip toutes les photos et vidéos d'un
+     * OR (réception, restitution, dossier de preuves garantie) — pour les
+     * réutiliser ailleurs (ex: transmission à la marque pour la réclamation
+     * garantie constructeur).
+     */
+    public function telechargerPhotos(OrdreReparation $ordresReparation)
+    {
+        $ordresReparation->load('photosOr');
+        if ($ordresReparation->photosOr->isEmpty()) {
+            return back()->with('error', 'Aucune photo à télécharger.');
+        }
+
+        $nomZip = "photos-{$ordresReparation->numero}.zip";
+        $cheminZip = storage_path("app/tmp-{$ordresReparation->id}-" . uniqid() . '.zip');
+
+        $zip = new \ZipArchive();
+        $zip->open($cheminZip, \ZipArchive::CREATE | \ZipArchive::OVERWRITE);
+
+        $nomsUtilises = [];
+        foreach ($ordresReparation->photosOr as $photo) {
+            $cheminDisque = Storage::disk('public')->path($photo->chemin);
+            if (! is_file($cheminDisque)) continue;
+
+            $prefixe = $photo->getCategorieLabel() ?? ($photo->moment === 'sortie' ? 'Restitution' : 'Reception');
+            $nom = $prefixe . '_' . ($photo->nom_original ?: basename($photo->chemin));
+
+            // Évite d'écraser un fichier dans le zip si deux photos portent le même nom
+            $nomFinal = $nom;
+            $i = 1;
+            while (in_array($nomFinal, $nomsUtilises, true)) {
+                $nomFinal = pathinfo($nom, PATHINFO_FILENAME) . "_{$i}." . pathinfo($nom, PATHINFO_EXTENSION);
+                $i++;
+            }
+            $nomsUtilises[] = $nomFinal;
+
+            $zip->addFile($cheminDisque, $nomFinal);
+        }
+        $zip->close();
+
+        return response()->download($cheminZip, $nomZip)->deleteFileAfterSend(true);
     }
 
     /**
@@ -371,7 +450,11 @@ class OrdreReparationController extends Controller
 
     /**
      * Valide le contrôle qualité et envoie le véhicule en lavage.
-     * Réservé aux utilisateurs avec la permission 'gerer_ordres' (chef de garage, réceptionniste, admin).
+     * Pas de signature électronique ni de choix à faire à chaque fois : le
+     * responsable qualité est un technicien fixe, désigné une fois pour toutes
+     * dans Réglages atelier (cf. ParametreAtelierController::updateControleQualiteTechnicien()) —
+     * c'est simplement son nom qui apparaît ensuite dans le cadre "Contrôle
+     * qualité" de la feuille de travail imprimée.
      */
     public function validerQualite(OrdreReparation $ordresReparation)
     {
@@ -384,7 +467,15 @@ class OrdreReparationController extends Controller
             abort(403);
         }
 
-        $ordresReparation->update(['statut' => 'lavage']);
+        $responsableQualite = \App\Models\ParametreAtelier::get()->controle_qualite_technicien_id;
+        if (! $responsableQualite) {
+            return back()->with('error', 'Aucun responsable qualité n\'est configuré — définissez-le dans Réglages atelier avant de valider.');
+        }
+
+        $ordresReparation->update([
+            'statut'                         => 'lavage',
+            'controle_qualite_technicien_id' => $responsableQualite,
+        ]);
         return back()->with('success', 'Contrôle qualité validé — véhicule en lavage.');
     }
 
@@ -588,7 +679,7 @@ class OrdreReparationController extends Controller
      */
     public function feuilletTravail(OrdreReparation $ordresReparation)
     {
-        $ordresReparation->load(['client', 'vehicule.typeMoteur', 'conseiller', 'technicien', 'chef', 'allDevis.lignes']);
+        $ordresReparation->load(['client', 'vehicule.typeMoteur', 'conseiller', 'technicien', 'chef', 'controleQualitePar', 'allDevis.lignes']);
 
         $tachesEntretien = null;
         if ($ordresReparation->type === 'entretien' && $ordresReparation->entretien_km_seuil && $ordresReparation->vehicule->type_moteur_id) {
@@ -720,10 +811,13 @@ class OrdreReparationController extends Controller
 
     /**
      * Traite la décision de garantie (approuvé ou refusé) pour un OR de type garantie.
-     * Si approuvée : l'OR passe en statut "devis_accepte" pour démarrer les travaux —
-     * la facturation ira ensuite au compte garantie de la marque (cf. FactureController).
-     * Si refusée : le motif est enregistré et l'OR redevient un OR normal, pour pouvoir
-     * établir un devis client et suivre le parcours standard jusqu'à la livraison.
+     * Dans les deux cas, un devis reste à établir avant les travaux (comme un OR
+     * normal) — seul le payeur final diffère :
+     *   - Approuvée : l'OR repasse en statut "diagnostic" pour permettre de créer un
+     *     devis ; la facturation ira ensuite au compte garantie de la marque
+     *     (cf. FactureController, MarqueGarantie::pourMarque()).
+     *   - Refusée : le motif est enregistré et l'OR redevient un OR normal, pour
+     *     établir un devis client et suivre le parcours standard jusqu'à la livraison.
      */
     public function changerStatutGarantie(Request $request, OrdreReparation $ordresReparation)
     {
@@ -750,9 +844,11 @@ class OrdreReparationController extends Controller
 
         $update = ['statut_garantie' => $request->statut_garantie];
 
-        // Garantie approuvée → motif enregistré, on peut démarrer les travaux
+        // Garantie approuvée → motif enregistré, un devis (facturé à la garantie
+        // constructeur) reste à créer avant de démarrer les travaux, comme pour
+        // un OR normal.
         if ($request->statut_garantie === 'approuve') {
-            $update['statut'] = 'devis_accepte';
+            $update['statut'] = 'diagnostic';
             $update['motif_approbation_garantie'] = $request->motif_approbation_garantie;
         }
         // Garantie refusée → motif enregistré, l'OR redevient normal (devis client possible)

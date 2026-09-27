@@ -67,6 +67,7 @@
         .chrono-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
         .c-box { border: 1.5px solid #ccc; border-radius: 3px; padding: 4px 6px; }
         .c-box label { font-size: 7pt; color: #666; display: block; margin-bottom: 3px; }
+        .c-box .c-value { font-weight: 700; font-size: 9pt; }
         .c-box .c-line { height: 22px; border-bottom: 1.5px solid #999; }
 
         /* ── Observations ── */
@@ -369,10 +370,25 @@
     {{-- ── Chronométrage ── --}}
     <div class="st" style="margin-top:6px;">Chronométrage</div>
     <div class="chrono-grid">
-        <div class="c-box"><label>Heure de début</label><div class="c-line"></div></div>
-        <div class="c-box"><label>Heure de fin</label><div class="c-line"></div></div>
-        <div class="c-box"><label>Durée réelle (H)</label><div class="c-line"></div></div>
-        <div class="c-box"><label>Durée standard (H)</label><div class="c-line"></div></div>
+        {{-- Reprend les horaires déjà pointés dans le système (cf. fiche OR) — la
+             ligne ne reste vide, pour être complétée à la main, que si l'information
+             n'a pas encore été enregistrée. --}}
+        <div class="c-box">
+            <label>Heure de début</label>
+            @if($or->heure_debut_travaux)<div class="c-value">{{ $or->heure_debut_travaux->format('H:i') }}</div>@else<div class="c-line"></div>@endif
+        </div>
+        <div class="c-box">
+            <label>Heure de fin</label>
+            @if($or->heure_fin_travaux)<div class="c-value">{{ $or->heure_fin_travaux->format('H:i') }}</div>@else<div class="c-line"></div>@endif
+        </div>
+        <div class="c-box">
+            <label>Durée réelle (H)</label>
+            @if($or->getDureeReelleHeures() !== null)<div class="c-value">{{ $or->formatDuree($or->getDureeReelleHeures()) }}</div>@else<div class="c-line"></div>@endif
+        </div>
+        <div class="c-box">
+            <label>Durée standard (H)</label>
+            @if($or->duree_estimee !== null)<div class="c-value">{{ $or->formatDuree($or->duree_estimee) }}</div>@else<div class="c-line"></div>@endif
+        </div>
     </div>
 
     {{-- ── Observations ── --}}
@@ -398,7 +414,7 @@
         </div>
         <div class="sig-box">
             <label>Contrôle qualité</label>
-            <div class="sig-name">&nbsp;</div>
+            <div class="sig-name">{{ $or->controleQualitePar?->name ?? '—' }}</div>
             <div class="sig-line"></div>
             <div class="sig-hint">Visa</div>
         </div>
