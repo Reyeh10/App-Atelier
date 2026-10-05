@@ -5,6 +5,22 @@
 
 @section('header-actions')
 <div class="flex gap-2">
+    {{-- Corrections administrateur (erreur de saisie à la réception, type de moteur oublié…) --}}
+    @if(auth()->user()->isAdmin())
+    <a href="{{ route('ordres-reparations.corriger', $or) }}"
+       class="flex items-center gap-2 text-sm bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg px-3 py-2 transition-colors">
+        ✏️ Corriger
+    </a>
+    @if($or->factures->isEmpty())
+    <form method="POST" action="{{ route('ordres-reparations.supprimer', $or) }}"
+          onsubmit="return confirm('Supprimer définitivement cet OR, ses devis, ses bons de commande et ses photos ? Action irréversible.')">
+        @csrf @method('DELETE')
+        <button type="submit" class="flex items-center gap-2 text-sm bg-red-500 hover:bg-red-600 text-white rounded-lg px-3 py-2 transition-colors">
+            🗑 Supprimer
+        </button>
+    </form>
+    @endif
+    @endif
     {{-- Tant que l'OR est de type garantie, il appartient exclusivement à
          l'équipe garantie (approbation/refus via le module Garantie plus bas) —
          le chef de garage ne peut pas en changer le statut, comme il ne peut
@@ -44,7 +60,7 @@
         📋 Feuille travail
     </a>
     @endif
-    @if(($or->statut === 'facture' && $or->facture?->peutEtreRestitue() || ($or->service_gratuit && $or->statut === 'pret')) && auth()->user()->hasPermission('restituer_vehicule'))
+    @if($or->peutEtreRestitue() && auth()->user()->hasPermission('restituer_vehicule'))
     <a href="{{ route('ordres-reparations.restitution', $or) }}"
        class="flex items-center gap-2 text-sm bg-green-600 hover:bg-green-700 text-white rounded-lg px-3 py-2 transition-colors font-bold">
         ✓ Restituer le véhicule
@@ -389,12 +405,24 @@
                 <div>
                     <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Bon de commande pièces</p>
                     <p class="font-mono font-bold text-slate-800">{{ $bc->numero }}</p>
+                    {{-- Bon de transfert du magasin --}}
+                    @if($bc->bonTransfert)
+                    <p class="text-xs text-slate-500 mt-0.5">BT <span class="font-mono font-semibold text-slate-700">{{ $bc->bonTransfert->numero }}</span> du {{ $bc->bonTransfert->date_transfert?->format('d/m/Y') }}</p>
+                    @else
+                    <p class="text-xs text-slate-400 mt-0.5">BT en attente du magasin</p>
+                    @endif
                 </div>
                 <span class="px-2.5 py-1 rounded-full text-xs font-bold bg-{{ $bc->getStatutColor() }}-100 text-{{ $bc->getStatutColor() }}-700">
                     {{ $bc->getStatutLabel() }}
                 </span>
             </div>
             <div class="flex items-center gap-2">
+                @if($bc->bonTransfert)
+                <a href="{{ route('bons-commande.bon-transfert', $bc) }}" target="_blank"
+                   class="text-xs border border-gray-300 text-slate-700 hover:bg-gray-50 font-bold px-3 py-1.5 rounded-lg transition-colors">
+                    📄 BT
+                </a>
+                @endif
                 <a href="{{ route('bons-commande.show', $bc) }}"
                    class="text-xs bg-teal-500 hover:bg-teal-600 text-white font-bold px-3 py-1.5 rounded-lg transition-colors">
                     Voir →
@@ -411,7 +439,7 @@
             <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
             </svg>
-            Pointage & Performance — {{ $or->technicien?->name ?? '—' }}
+            Pointage & Performance — @if($or->devisComplementaires()->isNotEmpty())Feuille 1 — @endif{{ $or->technicien?->name ?? '—' }}
         </h3>
 
         <div class="grid grid-cols-3 gap-3 mb-4">
@@ -442,6 +470,25 @@
                 @endif
             </div>
         </div>
+
+        {{-- Chronomètre en direct pendant les travaux (pas besoin de terminer pour voir le temps écoulé) --}}
+        @if($or->heure_debut_travaux && ! $or->heure_fin_travaux)
+        <div class="mb-4">
+        <div class="chrono-travaux bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-center justify-between gap-3 flex-wrap"
+             data-debut="{{ $or->heure_debut_travaux->toIso8601String() }}" data-estimee="{{ $or->duree_estimee ?? '' }}">
+            <div>
+                <p class="text-xs text-blue-400">⏱ Temps écoulé depuis le démarrage</p>
+                <p class="font-mono font-bold text-lg text-blue-800" data-chrono-ecoule>--:--:--</p>
+            </div>
+            @if($or->duree_estimee)
+            <div class="text-right">
+                <p class="text-xs text-blue-400" data-chrono-libelle>Temps restant (estimé {{ $or->formatDuree($or->duree_estimee) }})</p>
+                <p class="font-mono font-bold text-lg text-blue-800" data-chrono-reste>--:--:--</p>
+            </div>
+            @endif
+        </div>
+        </div>
+        @endif
 
         {{-- Durée nette (hors pauses) --}}
         @if($or->heure_debut_travaux && $or->heure_fin_travaux)
@@ -492,7 +539,7 @@
         {{-- Boutons pointage — le technicien n'a pas de compte, c'est le chef qui pointe pour lui --}}
         @if(auth()->user()->canManageWorkshop())
         <div class="flex gap-3 flex-wrap">
-            @if(!$or->heure_debut_travaux)
+            @if($or->peutDemarrerTravaux())
             <form method="POST" action="{{ route('ordres-reparations.demarrer', $or) }}" class="flex-1">
                 @csrf @method('PATCH')
                 <button type="submit" class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2.5 rounded-xl text-sm transition-colors">
@@ -500,7 +547,7 @@
                 </button>
             </form>
             @endif
-            @if($or->heure_debut_travaux && !$or->heure_fin_travaux)
+            @if($or->peutTerminerTravaux())
             <form method="POST" action="{{ route('ordres-reparations.terminer', $or) }}" class="flex-1 flex gap-2">
                 @csrf @method('PATCH')
                 @if(!$or->duree_estimee)
@@ -514,6 +561,154 @@
             @endif
         </div>
         @endif
+    </div>
+    @endif
+
+    {{-- Feuilles de travail — une par devis accepté. La feuille 1 (premier devis
+         accepté) utilise l'affectation et le pointage ci-dessus ; chaque devis
+         complémentaire a sa propre feuille, son technicien et son pointage. Le
+         véhicule passe au contrôle qualité quand toutes les feuilles sont terminées. --}}
+    @if($or->devisComplementaires()->isNotEmpty())
+    @php
+        $gestionAtelier   = auth()->user()->canManageWorkshop() && ! ($or->type === 'garantie' && $or->statut_garantie !== 'approuve');
+        $techniciensActifs = \App\Models\Technicien::where('actif', true)->orderBy('nom')->get();
+        $servicesAtelier  = ['rapide'=>'Service Rapide','mecanique'=>'Mécanique','electricite'=>'Électricité','carrosserie'=>'Carrosserie','peinture'=>'Peinture'];
+        $principal        = $or->devisPrincipal();
+    @endphp
+    <div class="bg-white rounded-2xl border border-gray-200 p-6">
+        <h3 class="font-semibold text-slate-800 mb-1 flex items-center gap-2">
+            <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+            </svg>
+            Feuilles de travail
+            <span class="text-xs text-slate-400 font-normal">({{ $or->devisComplementaires()->count() + 1 }})</span>
+        </h3>
+        <p class="text-xs text-slate-400 mb-4">Une feuille par devis accepté, chacune avec son technicien et son pointage. Le véhicule passe au contrôle qualité quand toutes les feuilles sont terminées.</p>
+
+        <div class="space-y-3">
+            {{-- Feuille 1 — affectation et pointage dans les blocs dédiés de la page --}}
+            <div class="border border-gray-200 rounded-xl p-4">
+                <div class="flex items-center justify-between gap-3 flex-wrap">
+                    <div>
+                        <p class="text-sm font-bold text-slate-800">Feuille 1 @if($principal)<span class="font-mono text-xs text-slate-500">— Devis {{ $principal->numero }}</span>@endif</p>
+                        <p class="text-xs text-slate-500 mt-0.5">
+                            @if($or->heure_fin_travaux) ✓ Terminée — {{ $or->technicien?->name ?? '—' }}
+                            @elseif($or->heure_debut_travaux) En cours depuis {{ $or->heure_debut_travaux->format('H:i') }} — {{ $or->technicien?->name ?? '—' }}
+                            @elseif($or->isAffecte()) Affectée à {{ $or->technicien?->name ?? '—' }} ({{ $or->getServiceLabel() }})
+                            @else Non affectée — voir le bloc « Affectation mécanicien »
+                            @endif
+                        </p>
+                    </div>
+                    <div class="flex items-center gap-1">
+                        <a href="{{ route('ordres-reparations.feuille-travail', $or) }}?apercu=1" target="_blank" class="text-xs text-slate-500 hover:text-slate-800 border border-gray-200 rounded-lg px-2 py-1 transition-colors" title="Aperçu">👁</a>
+                        <a href="{{ route('ordres-reparations.feuille-travail', $or) }}" target="_blank" class="text-xs text-slate-500 hover:text-slate-800 border border-gray-200 rounded-lg px-2 py-1 transition-colors" title="Imprimer">🖨</a>
+                    </div>
+                </div>
+            </div>
+
+            {{-- Feuilles des devis complémentaires --}}
+            @foreach($or->devisComplementaires() as $index => $dc)
+            @php $bcDc = $dc->bonCommande; @endphp
+            <div class="border-2 {{ $dc->heure_fin_travaux ? 'border-green-300' : ($dc->attendPieces() ? 'border-yellow-300' : 'border-orange-300') }} rounded-xl p-4">
+                <div class="flex items-center justify-between gap-3 flex-wrap">
+                    <div>
+                        <p class="text-sm font-bold text-slate-800">Feuille {{ $index + 2 }} <span class="font-mono text-xs text-slate-500">— Devis complémentaire {{ $dc->numero }}</span></p>
+                        <p class="text-xs text-slate-500 mt-0.5">
+                            @if($dc->heure_fin_travaux) ✓ Terminée — {{ $dc->technicien?->name ?? '—' }} @if($dc->getDureeReelleHeures() !== null)({{ $or->formatDuree($dc->getDureeReelleHeures()) }})@endif
+                            @elseif($dc->heure_debut_travaux) En cours depuis {{ $dc->heure_debut_travaux->format('H:i') }} — {{ $dc->technicien?->name ?? '—' }}
+                            @elseif($dc->isAffecte()) Affectée à {{ $dc->technicien?->name ?? '—' }} ({{ $dc->getServiceLabel() }})
+                            @else Non affectée
+                            @endif
+                        </p>
+                        @if($bcDc)
+                        <p class="text-xs mt-1">
+                            <a href="{{ route('bons-commande.show', $bcDc) }}" class="font-mono text-orange-500 hover:underline">{{ $bcDc->numero }}</a>
+                            <span class="px-2 py-0.5 rounded-full text-xs font-bold bg-{{ $bcDc->getStatutColor() }}-100 text-{{ $bcDc->getStatutColor() }}-700">{{ $bcDc->getStatutLabel() }}</span>
+                            @if($bcDc->bonTransfert)
+                            · <a href="{{ route('bons-commande.bon-transfert', $bcDc) }}" target="_blank" class="font-mono text-orange-500 hover:underline">BT {{ $bcDc->bonTransfert->numero }}</a>
+                            @else
+                            <span class="text-slate-400">· BT en attente</span>
+                            @endif
+                        </p>
+                        @endif
+                    </div>
+                    <div class="flex items-center gap-1">
+                        <a href="{{ route('ordres-reparations.feuille-travail.devis', [$or, $dc]) }}?apercu=1" target="_blank" class="text-xs text-slate-500 hover:text-slate-800 border border-gray-200 rounded-lg px-2 py-1 transition-colors" title="Aperçu">👁</a>
+                        <a href="{{ route('ordres-reparations.feuille-travail.devis', [$or, $dc]) }}" target="_blank" class="text-xs text-slate-500 hover:text-slate-800 border border-gray-200 rounded-lg px-2 py-1 transition-colors" title="Imprimer">🖨</a>
+                    </div>
+                </div>
+
+                @if($dc->heure_debut_travaux && ! $dc->heure_fin_travaux)
+                <div class="mt-3">
+                <div class="chrono-travaux bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-center justify-between gap-3 flex-wrap"
+                     data-debut="{{ $dc->heure_debut_travaux->toIso8601String() }}" data-estimee="{{ $dc->duree_estimee ?? '' }}">
+                    <div>
+                        <p class="text-xs text-blue-400">⏱ Temps écoulé depuis le démarrage</p>
+                        <p class="font-mono font-bold text-lg text-blue-800" data-chrono-ecoule>--:--:--</p>
+                    </div>
+                    @if($dc->duree_estimee)
+                    <div class="text-right">
+                        <p class="text-xs text-blue-400" data-chrono-libelle>Temps restant (estimé {{ $or->formatDuree($dc->duree_estimee) }})</p>
+                        <p class="font-mono font-bold text-lg text-blue-800" data-chrono-reste>--:--:--</p>
+                    </div>
+                    @endif
+                </div>
+                </div>
+                @endif
+
+                @if($gestionAtelier && ! $dc->heure_fin_travaux && ! $or->travauxClos())
+                <div class="mt-3 border-t border-gray-100 pt-3">
+                    @if($dc->attendPieces())
+                    <div class="bg-yellow-50 border border-yellow-200 rounded-xl p-3 text-xs text-yellow-800">
+                        <p class="font-bold mb-1">⏳ En attente des pièces</p>
+                        <p>Le bon de commande <span class="font-mono font-bold">{{ $bcDc->numero }}</span> de ce devis n'est pas encore reçu. Il doit être marqué <strong>"Tout reçu"</strong> avant de pouvoir affecter un technicien à cette feuille.</p>
+                    </div>
+                    @else
+                        @if(! $dc->heure_debut_travaux)
+                        <form method="POST" action="{{ route('ordres-reparations.feuilles.affecter', [$or, $dc]) }}" class="flex gap-2 flex-wrap items-center">
+                            @csrf @method('PATCH')
+                            <select name="technicien_id" required class="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                <option value="">Choisir un technicien</option>
+                                @foreach($techniciensActifs as $tech)
+                                <option value="{{ $tech->id }}" {{ $dc->technicien_id == $tech->id ? 'selected' : '' }}>{{ $tech->name }}</option>
+                                @endforeach
+                            </select>
+                            <select name="service" required class="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                <option value="">Choisir un service</option>
+                                @foreach($servicesAtelier as $val => $label)
+                                <option value="{{ $val }}" {{ $dc->service === $val ? 'selected' : '' }}>{{ $label }}</option>
+                                @endforeach
+                            </select>
+                            @php $dureeDc = $dc->duree_estimee ?? ($dc->lignes->where('type', 'main_oeuvre')->sum('quantite') ?: null); @endphp
+                            <input type="number" name="duree_estimee" value="{{ $dureeDc }}" placeholder="Durée (h)" min="0.25" step="0.25"
+                                   class="w-28 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
+                            <button type="submit" class="bg-orange-500 hover:bg-orange-600 text-white font-bold px-4 py-2 rounded-xl text-sm transition-colors">
+                                {{ $dc->isAffecte() ? 'Réaffecter' : 'Affecter' }}
+                            </button>
+                        </form>
+                        @endif
+
+                        @if($dc->isAffecte())
+                        <div class="flex gap-3 flex-wrap mt-2">
+                            @if(! $dc->heure_debut_travaux)
+                            <form method="POST" action="{{ route('ordres-reparations.feuilles.demarrer', [$or, $dc]) }}" class="flex-1">
+                                @csrf @method('PATCH')
+                                <button type="submit" class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 rounded-xl text-sm transition-colors">▶ Démarrer cette feuille</button>
+                            </form>
+                            @else
+                            <form method="POST" action="{{ route('ordres-reparations.feuilles.terminer', [$or, $dc]) }}" class="flex-1">
+                                @csrf @method('PATCH')
+                                <button type="submit" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2 rounded-xl text-sm transition-colors">⏹ Terminer cette feuille</button>
+                            </form>
+                            @endif
+                        </div>
+                        @endif
+                    @endif
+                </div>
+                @endif
+            </div>
+            @endforeach
+        </div>
     </div>
     @endif
 
@@ -890,12 +1085,14 @@
          décision : la prise en charge est gérée par l'équipe garantie. Une fois approuvée
          (devis accepté, facturé ensuite à la marque) ou refusée (redevient "normal", cf.
          changerStatutGarantie), l'affectation suit le parcours standard. --}}
-    @if(auth()->user()->canManageWorkshop() && ! ($or->type === 'garantie' && $or->statut_garantie !== 'approuve'))
+    @if(auth()->user()->canManageWorkshop() && $or->peutEtreAffecte())
     @php
-        $bcBloquant = $or->bonsCommande()->whereIn('statut', ['en_attente', 'commande'])->first();
+        // Feuille 1 : seul le BC du premier devis accepté bloque (les BC des devis
+        // complémentaires ne bloquent que leur propre feuille, cf. « Feuilles de travail »)
+        $bcBloquant = $or->bcBloquantFeuille1();
     @endphp
     <div class="bg-white rounded-2xl border-2 {{ $bcBloquant ? 'border-yellow-300' : ($or->isAffecte() ? 'border-green-300' : 'border-orange-300') }} p-5">
-        <h3 class="text-sm font-semibold text-slate-700 mb-3">Affectation mécanicien</h3>
+        <h3 class="text-sm font-semibold text-slate-700 mb-3">Affectation mécanicien @if($or->devisComplementaires()->isNotEmpty())— Feuille 1 @endif</h3>
 
         @if($or->isAffecte())
         <div class="space-y-2 mb-3">
@@ -937,7 +1134,8 @@
             </select>
             @php
                 $dureeReservation = $or->dossier?->reservation?->duree_estimee;
-                $dureeDevisSomme  = $or->allDevis->flatMap->lignes->where('type', 'main_oeuvre')->sum('quantite');
+                $devisFeuille1    = $or->devisPrincipal() ? collect([$or->devisPrincipal()]) : $or->allDevis;
+                $dureeDevisSomme  = $devisFeuille1->flatMap->lignes->where('type', 'main_oeuvre')->sum('quantite');
                 $dureeSuggeree    = $or->duree_estimee ?? $dureeReservation ?? ($dureeDevisSomme > 0 ? $dureeDevisSomme : null);
             @endphp
             <div class="flex gap-2">
@@ -973,3 +1171,47 @@
 </div>
 </div>
 @endsection
+
+@push('scripts')
+<script>
+// Chronomètre des travaux en cours : temps écoulé depuis « Démarrer » et, si une
+// durée estimée existe, compte à rebours du temps restant (rouge une fois dépassé).
+(function () {
+    const blocs = document.querySelectorAll('.chrono-travaux');
+    if (!blocs.length) return;
+
+    const format = (secondes) => {
+        const s = Math.max(0, Math.floor(secondes));
+        const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
+        return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(r).padStart(2, '0');
+    };
+
+    function mettreAJour() {
+        blocs.forEach(function (bloc) {
+            const ecoule = (Date.now() - new Date(bloc.dataset.debut).getTime()) / 1000;
+            bloc.querySelector('[data-chrono-ecoule]').textContent = format(ecoule);
+
+            const estimeeHeures = parseFloat(bloc.dataset.estimee);
+            const reste = bloc.querySelector('[data-chrono-reste]');
+            if (!reste || !(estimeeHeures > 0)) return;
+
+            const restant = estimeeHeures * 3600 - ecoule;
+            const depasse = restant < 0;
+            reste.textContent = (depasse ? '+' : '') + format(Math.abs(restant));
+            const libelle = bloc.querySelector('[data-chrono-libelle]');
+            if (!libelle.dataset.origine) libelle.dataset.origine = libelle.textContent;
+            libelle.textContent = depasse ? 'Dépassement de la durée estimée' : libelle.dataset.origine;
+            reste.classList.toggle('text-red-600', depasse);
+            reste.classList.toggle('text-blue-800', !depasse);
+            bloc.classList.toggle('bg-red-50', depasse);
+            bloc.classList.toggle('border-red-200', depasse);
+            bloc.classList.toggle('bg-blue-50', !depasse);
+            bloc.classList.toggle('border-blue-200', !depasse);
+        });
+    }
+
+    mettreAJour();
+    setInterval(mettreAJour, 1000);
+})();
+</script>
+@endpush

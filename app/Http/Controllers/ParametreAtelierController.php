@@ -56,6 +56,25 @@ class ParametreAtelierController extends Controller
     }
 
     /**
+     * Main-d'œuvre ajoutée automatiquement à chaque facture flotte (une par
+     * bus) — cf. LivraisonFlotte::lignesProposees(). 0 = pas d'ajout.
+     */
+    public function updateMainOeuvreFlotte(Request $request)
+    {
+        $data = $request->validate([
+            'main_oeuvre_flotte' => ['required', 'integer', 'min:0'],
+        ], [
+            'main_oeuvre_flotte.required' => 'Indiquez le montant (0 pour ne rien ajouter).',
+            'main_oeuvre_flotte.integer'  => 'Le montant doit être un nombre entier de FDJ.',
+            'main_oeuvre_flotte.min'      => 'Le montant ne peut pas être négatif.',
+        ]);
+
+        ParametreAtelier::get()->update($data);
+
+        return back()->with('success', 'Main-d\'œuvre flotte : ' . number_format($data['main_oeuvre_flotte'], 0, ',', ' ') . ' FDJ par facture.');
+    }
+
+    /**
      * Met à jour la capacité Service Rapide : nombre de véhicules pouvant
      * être pris en charge EN MÊME TEMPS (postes disponibles), utilisée pour
      * le planning des réservations et le contrôle "Sans RDV" à la réception.

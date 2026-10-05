@@ -1,12 +1,23 @@
 @extends('layouts.app')
-@section('title', 'Créer une facture')
-@section('page-title', 'Créer une facture')
+@php
+    // Même formulaire pour corriger une facture (administrateur) : lignes reprises
+    // de la facture, et à l'enregistrement avoir + nouvelle facture.
+    $correction = $factureACorriger ?? null;
+@endphp
+@section('title', $correction ? 'Corriger la facture ' . $correction->numero : 'Créer une facture')
+@section('page-title', $correction ? 'Corriger la facture ' . $correction->numero : 'Créer une facture')
 @section('page-subtitle', $or->numero . ' — ' . $or->client->nom_complet)
 
 @section('header-actions')
+@if($correction)
+<a href="{{ route('factures.show', $correction) }}" class="flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 border border-gray-300 rounded-lg px-3 py-2 transition-colors">
+    ← Retour facture
+</a>
+@else
 <a href="{{ route('ordres-reparations.show', $or) }}" class="flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 border border-gray-300 rounded-lg px-3 py-2 transition-colors">
     ← Retour OR
 </a>
+@endif
 @endsection
 
 @php
@@ -15,9 +26,34 @@
 @endphp
 
 @section('content')
-<form method="POST" action="{{ route('factures.store', $or) }}" id="form-facture">
+<form method="POST" action="{{ $correction ? route('factures.corriger.enregistrer', $correction) : route('factures.store', $or) }}" id="form-facture">
 @csrf
+@if($correction) @method('PUT') @endif
 <div class="max-w-5xl space-y-5">
+
+@if($errors->any())
+<div class="bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+    <ul class="space-y-1">
+        @foreach($errors->all() as $e)
+        <li class="text-sm text-red-700">• {{ $e }}</li>
+        @endforeach
+    </ul>
+</div>
+@endif
+
+@if($correction)
+<div class="bg-amber-50 border border-amber-200 rounded-xl px-4 py-4 space-y-3">
+    <div class="text-sm text-amber-800">
+        <p class="font-bold">Correction de la facture {{ $correction->numero }} ({{ number_format($correction->totalGeneral(), 0, ',', ' ') }} FDJ)</p>
+        <p class="mt-1">À l'enregistrement : un <strong>avoir</strong> annule la facture {{ $correction->numero }} en totalité, puis une <strong>nouvelle facture</strong> (nouveau numéro) est émise avec les lignes ci-dessous.
+        @if($correction->montant_paye > 0) Le paiement déjà reçu ({{ number_format($correction->montant_paye, 0, ',', ' ') }} FDJ) est reporté sur la nouvelle facture.@endif</p>
+    </div>
+    <div>
+        <label class="block text-xs font-semibold text-amber-800 uppercase tracking-wider mb-1.5">Motif de la correction <span class="text-red-500">*</span></label>
+        <textarea name="motif" rows="2" required maxlength="1000" class="w-full px-4 py-2.5 border border-amber-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none bg-white" placeholder="Ex : erreur de prix sur la pièce, remise oubliée...">{{ old('motif') }}</textarea>
+    </div>
+</div>
+@endif
 
 @if($estGarantieApprouvee)
 <div class="bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3 text-sm text-indigo-800">
@@ -110,21 +146,28 @@
                 $uniteOptions = ['PCS' => 'PCS', 'Litre' => 'Litre', 'H' => 'H (heure)', 'Fft' => 'Forfait', 'Kg' => 'Kg', 'U' => 'Unité', 'Lot' => 'Lot'];
                 $uniteDefaut  = ['main_oeuvre' => 'H', 'piece' => 'PCS', 'forfait' => 'Fft', 'autre' => 'U'];
                 $i = 0;
-                $totalLignes = $or->allDevis->sum(fn($d) => $d->lignes->count());
+                // Lignes proposées : celles des devis de l'OR, ou celles de la facture à corriger
+                $groupes = $correction
+                    ? [['titre' => 'Facture ' . $correction->numero, 'devis' => null, 'lignes' => $correction->lignes]]
+                    : $or->allDevis->map(fn($d) => ['titre' => $d->numero, 'devis' => $d, 'lignes' => $d->lignes])->all();
+                $totalLignes = collect($groupes)->sum(fn($g) => $g['lignes']->count());
                 @endphp
 
                 @if($totalLignes > 0)
-                    @foreach($or->allDevis as $devis)
-                        @if($devis->lignes->count())
+                    @foreach($groupes as $groupe)
+                        @php $devis = $groupe['devis']; @endphp
+                        @if($groupe['lignes']->count())
                         {{-- Séparateur de devis --}}
                         <tr class="bg-slate-50">
                             <td colspan="9" class="px-4 py-2 text-xs font-bold text-slate-500 uppercase tracking-wider border-b border-slate-200">
-                                {{ $devis->numero }}
+                                {{ $groupe['titre'] }}
+                                @if($devis)
                                 <span class="ml-2 px-2 py-0.5 rounded-full bg-{{ $devis->getStatutColor() }}-100 text-{{ $devis->getStatutColor() }}-700 font-medium normal-case">{{ $devis->getStatutLabel() }}</span>
-                                <span class="ml-1 text-slate-400 font-normal">— {{ $devis->lignes->count() }} ligne(s)</span>
+                                @endif
+                                <span class="ml-1 text-slate-400 font-normal">— {{ $groupe['lignes']->count() }} ligne(s)</span>
                             </td>
                         </tr>
-                        @foreach($devis->lignes as $ligne)
+                        @foreach($groupe['lignes'] as $ligne)
                         @php $defUnite = $uniteDefaut[$ligne->type] ?? 'U'; @endphp
                         <tr class="ligne-row border-b border-gray-100 {{ $ligne->type === 'main_oeuvre' ? 'bg-blue-50/30' : ($ligne->type === 'piece' ? 'bg-orange-50/30' : '') }}" data-index="{{ $i }}">
                             <td class="px-3 py-3">
@@ -152,11 +195,11 @@
                                 </select>
                             </td>
                             <td class="px-3 py-3">
-                                <input type="number" name="lignes[{{ $i }}][quantite]" value="{{ $ligne->quantite }}" min="0.01" step="0.01"
+                                <input type="number" name="lignes[{{ $i }}][quantite]" value="{{ (float) $ligne->quantite }}" min="0.01" step="0.01"
                                        class="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-right focus:outline-none focus:ring-1 focus:ring-orange-500 ligne-qty" oninput="calculerLigne(this)">
                             </td>
                             <td class="px-3 py-3">
-                                <input type="number" name="lignes[{{ $i }}][prix_unitaire]" value="{{ $ligne->prix_unitaire }}" min="0" step="0.01"
+                                <input type="number" name="lignes[{{ $i }}][prix_unitaire]" value="{{ (int) round($ligne->prix_unitaire) }}" min="0" step="0.01"
                                        class="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-right focus:outline-none focus:ring-1 focus:ring-orange-500 ligne-pu" oninput="calculerLigne(this)">
                             </td>
                             <td class="px-3 py-3">
@@ -165,7 +208,7 @@
                             </td>
                             <td class="px-3 py-3 text-right">
                                 <span class="font-semibold text-slate-800 ligne-total text-xs">{{ number_format($ligne->total_ht, 0, ',', ' ') }}</span>
-                                <input type="hidden" name="lignes[{{ $i }}][total_ht]" class="ligne-total-input" value="{{ $ligne->total_ht }}">
+                                <input type="hidden" name="lignes[{{ $i }}][total_ht]" class="ligne-total-input" value="{{ (int) round($ligne->total_ht) }}">
                             </td>
                             <td class="px-3 py-3 text-center">
                                 <button type="button" onclick="supprimerLigne(this)" class="text-red-400 hover:text-red-600">
@@ -193,9 +236,9 @@
                         </select>
                     </td>
                     <td class="px-3 py-3"><input type="number" name="lignes[0][quantite]" value="1" min="0.01" step="0.01" class="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-right focus:outline-none focus:ring-1 focus:ring-orange-500 ligne-qty" oninput="calculerLigne(this)"></td>
-                    <td class="px-3 py-3"><input type="number" name="lignes[0][prix_unitaire]" value="0" min="0" step="0.01" class="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-right focus:outline-none focus:ring-1 focus:ring-orange-500 ligne-pu" oninput="calculerLigne(this)"></td>
+                    <td class="px-3 py-3"><input type="number" name="lignes[0][prix_unitaire]" value="0" min="0" step="1" class="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-right focus:outline-none focus:ring-1 focus:ring-orange-500 ligne-pu" oninput="calculerLigne(this)"></td>
                     <td class="px-3 py-3"><input type="number" name="lignes[0][remise]" value="0" min="0" max="100" step="0.01" class="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-right focus:outline-none focus:ring-1 focus:ring-orange-500 ligne-remise" oninput="calculerLigne(this)"></td>
-                    <td class="px-3 py-3 text-right"><span class="font-semibold text-slate-800 ligne-total text-xs">0,00</span><input type="hidden" name="lignes[0][total_ht]" class="ligne-total-input" value="0"></td>
+                    <td class="px-3 py-3 text-right"><span class="font-semibold text-slate-800 ligne-total text-xs">0</span><input type="hidden" name="lignes[0][total_ht]" class="ligne-total-input" value="0"></td>
                     <td class="px-3 py-3"></td>
                 </tr>
                 @endif
@@ -207,16 +250,16 @@
         <div class="flex items-end justify-between">
             {{-- Frais de timbre optionnels : ajoutés seulement si la caissière coche la case (1 000 FDJ fixes) --}}
             <label class="flex items-center gap-3 cursor-pointer select-none bg-white border border-gray-300 hover:border-orange-400 rounded-xl px-4 py-2.5 transition-colors">
-                <input type="checkbox" name="frais_timbre" id="frais_timbre" value="1"
+                <input type="checkbox" name="frais_timbre" id="frais_timbre" value="1" {{ $correction && $correction->frais_timbre > 0 ? 'checked' : '' }}
                        class="w-4 h-4 text-orange-500 border-gray-300 rounded focus:ring-orange-500"
                        onchange="recalculerTotaux()">
                 <span class="text-sm font-semibold text-slate-700">Ajouter les frais de timbre <span class="text-slate-400 font-normal">(1 000 FDJ)</span></span>
             </label>
             <div class="space-y-2 min-w-64">
-                <div class="flex justify-between text-sm"><span class="text-slate-500">Total HT</span><span class="font-semibold" id="total-ht">0,00 FDJ</span></div>
-                <div class="flex justify-between text-sm"><span class="text-slate-500">TVA (10%)</span><span class="font-semibold" id="total-tva">0,00 FDJ</span></div>
-                <div class="flex justify-between text-sm"><span class="text-slate-500">Frais de timbre</span><span class="font-semibold" id="total-timbre">0,00 FDJ</span></div>
-                <div class="flex justify-between text-base font-bold border-t border-gray-300 pt-2"><span>Total général</span><span class="text-orange-500" id="total-ttc">0,00 FDJ</span></div>
+                <div class="flex justify-between text-sm"><span class="text-slate-500">Total HT</span><span class="font-semibold" id="total-ht">0 FDJ</span></div>
+                <div class="flex justify-between text-sm"><span class="text-slate-500">TVA (10%)</span><span class="font-semibold" id="total-tva">0 FDJ</span></div>
+                <div class="flex justify-between text-sm"><span class="text-slate-500">Frais de timbre</span><span class="font-semibold" id="total-timbre">0 FDJ</span></div>
+                <div class="flex justify-between text-base font-bold border-t border-gray-300 pt-2"><span>Total général</span><span class="text-orange-500" id="total-ttc">0 FDJ</span></div>
             </div>
         </div>
     </div>
@@ -224,14 +267,14 @@
 
 <div>
     <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Notes sur la facture</label>
-    <textarea name="notes" rows="2" class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none bg-white" placeholder="Conditions de paiement, remarques..."></textarea>
+    <textarea name="notes" rows="2" class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none bg-white" placeholder="Conditions de paiement, remarques...">{{ $correction?->notes }}</textarea>
 </div>
 
 <div class="flex items-center gap-3 pb-6">
     <button type="submit" class="bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 px-8 rounded-xl transition-colors shadow-sm text-sm">
-        Émettre la facture
+        {{ $correction ? "Émettre l'avoir et la facture corrigée" : 'Émettre la facture' }}
     </button>
-    <a href="{{ route('ordres-reparations.show', $or) }}" class="px-6 py-3 border border-gray-300 text-slate-600 font-medium rounded-xl hover:bg-gray-50 transition-colors text-sm">
+    <a href="{{ $correction ? route('factures.show', $correction) : route('ordres-reparations.show', $or) }}" class="px-6 py-3 border border-gray-300 text-slate-600 font-medium rounded-xl hover:bg-gray-50 transition-colors text-sm">
         Annuler
     </a>
 </div>
@@ -240,7 +283,7 @@
 </form>
 
 <script>
-let ligneIndex = {{ max(1, $or->allDevis->sum(fn($d) => $d->lignes->count())) }};
+let ligneIndex = {{ max(1, $totalLignes) }};
 
 function selectMode(val) {
     document.getElementById('mode_paiement_value').value = val;
@@ -265,9 +308,9 @@ function ajouterLigne() {
         <td class="px-3 py-3"><input type="text" name="lignes[${i}][reference]" placeholder="Réf." class="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-orange-500"></td>
         <td class="px-3 py-3"><select name="lignes[${i}][unite]" class="w-full border border-gray-300 rounded-lg px-1 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-orange-500"><option value="PCS" selected>PCS</option><option value="Litre">Litre</option><option value="H">H</option><option value="Fft">Fft</option><option value="Kg">Kg</option><option value="U">U</option><option value="Lot">Lot</option></select></td>
         <td class="px-3 py-3"><input type="number" name="lignes[${i}][quantite]" value="1" min="0.01" step="0.01" class="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-right focus:outline-none focus:ring-1 focus:ring-orange-500 ligne-qty" oninput="calculerLigne(this)"></td>
-        <td class="px-3 py-3"><input type="number" name="lignes[${i}][prix_unitaire]" value="0" min="0" step="0.01" class="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-right focus:outline-none focus:ring-1 focus:ring-orange-500 ligne-pu" oninput="calculerLigne(this)"></td>
+        <td class="px-3 py-3"><input type="number" name="lignes[${i}][prix_unitaire]" value="0" min="0" step="1" class="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-right focus:outline-none focus:ring-1 focus:ring-orange-500 ligne-pu" oninput="calculerLigne(this)"></td>
         <td class="px-3 py-3"><input type="number" name="lignes[${i}][remise]" value="0" min="0" max="100" step="0.01" class="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-right focus:outline-none focus:ring-1 focus:ring-orange-500 ligne-remise" oninput="calculerLigne(this)"></td>
-        <td class="px-3 py-3 text-right"><span class="font-semibold text-slate-800 ligne-total text-xs">0,00</span><input type="hidden" name="lignes[${i}][total_ht]" class="ligne-total-input" value="0"></td>
+        <td class="px-3 py-3 text-right"><span class="font-semibold text-slate-800 ligne-total text-xs">0</span><input type="hidden" name="lignes[${i}][total_ht]" class="ligne-total-input" value="0"></td>
         <td class="px-3 py-3 text-center"><button type="button" onclick="supprimerLigne(this)" class="text-red-400 hover:text-red-600"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg></button></td>`;
     document.getElementById('lignes-body').appendChild(row);
 }
@@ -282,7 +325,7 @@ function calculerLigne(input) {
     const row = input.closest('tr');
     const total = (parseFloat(row.querySelector('.ligne-qty').value)||0) * (parseFloat(row.querySelector('.ligne-pu').value)||0) * (1 - (parseFloat(row.querySelector('.ligne-remise').value)||0)/100);
     row.querySelector('.ligne-total').textContent = formatFDJ(total);
-    row.querySelector('.ligne-total-input').value = total.toFixed(2);
+    row.querySelector('.ligne-total-input').value = Math.round(total);
     recalculerTotaux();
 }
 
@@ -290,7 +333,7 @@ function recalculerTotaux() {
     // Taux fixe imposé par la direction — non modifiable par le formulaire.
     let ht = 0;
     document.querySelectorAll('.ligne-total-input').forEach(i => { ht += parseFloat(i.value)||0; });
-    const tva    = ht * 0.10;
+    const tva    = Math.round(ht * 0.10);
     const timbre = document.getElementById('frais_timbre').checked ? 1000 : 0;
     const total  = ht + tva + timbre;
     document.getElementById('total-ht').textContent     = formatFDJ(ht) + ' FDJ';
@@ -299,7 +342,7 @@ function recalculerTotaux() {
     document.getElementById('total-ttc').textContent    = formatFDJ(total) + ' FDJ';
 }
 
-function formatFDJ(n) { return n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ' ').replace('.', ','); }
+function formatFDJ(n) { return Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' '); }
 
 document.addEventListener('DOMContentLoaded', recalculerTotaux);
 </script>

@@ -7,6 +7,8 @@ use App\Models\Reservation;
 use App\Models\Vehicule;
 use App\Services\ReservationService;
 use Illuminate\Http\Request;
+use App\Models\User;
+use Illuminate\Support\Facades\Auth;
 
 /**
  * Écran d'entrée de la Réception : choix du motif de visite du client
@@ -17,7 +19,12 @@ class ReceptionController extends Controller
 {
     public function index(Request $request)
     {
-        if (! auth()->user()->hasPermission('creer_dossiers')) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->hasPermission('creer_dossiers')) {
+            abort(403);
+        }
 
         $capacite        = ReservationService::capacite();
         $placesRestantes = ReservationService::placesLibresMaintenant();

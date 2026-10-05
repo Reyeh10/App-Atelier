@@ -47,6 +47,8 @@
                     <td class="px-5 py-3">
                         @if(!empty($categoriesManquantes))
                         <span class="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-700" title="Manque : {{ implode(', ', $categoriesManquantes) }}">⚠ Dossier garantie incomplet</span>
+                        @elseif($raisonNonFacturable = $or->raisonNonFacturable())
+                        <span class="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-700" title="{{ $raisonNonFacturable }}">⚠ Pièces à recevoir</span>
                         @else
                         <span class="px-2 py-0.5 rounded-full text-xs font-bold bg-green-100 text-green-700">À facturer</span>
                         @endif
@@ -54,6 +56,8 @@
                     <td class="px-5 py-3 text-right whitespace-nowrap">
                         @if(!empty($categoriesManquantes))
                         <span class="text-xs text-slate-400 font-medium px-4 py-1.5 inline-block" title="Il manque : {{ implode(', ', $categoriesManquantes) }}">Facturation bloquée</span>
+                        @elseif($raisonNonFacturable)
+                        <span class="text-xs text-slate-400 font-medium px-4 py-1.5 inline-block" title="{{ $raisonNonFacturable }}">Facturation bloquée</span>
                         @else
                         <a href="{{ route('factures.create', $or) }}"
                            class="text-xs bg-green-500 hover:bg-green-600 text-white font-bold px-4 py-1.5 rounded-lg transition-colors">

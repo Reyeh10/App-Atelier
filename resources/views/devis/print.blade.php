@@ -234,7 +234,11 @@
             <div class="row"><span class="lbl">CODE NIF :</span> {{ $client->nif }}</div>
             @endif
             <div class="row"><span class="lbl">N° BON DE COMMANDE :</span></div>
+            @if($devis->estEnAvance())
+            <div class="row"><span class="lbl">KM PRÉVU :</span> {{ $devis->kilometrage_prevu ? number_format($devis->kilometrage_prevu, 0, ',', ' ') . ' km' : '—' }}</div>
+            @else
             <div class="row"><span class="lbl">KM :</span> {{ number_format($or->kilometrage_entree, 0, ',', ' ') }} km</div>
+            @endif
             @if($vehicule->date_mise_circulation)
             <div class="row"><span class="lbl">Date de mise en circulation :</span> {{ $vehicule->date_mise_circulation->format('d/m/Y') }}</div>
             @endif
@@ -286,7 +290,7 @@
                 <td class="tc"></td>
                 <td style="font-family:monospace;font-size:8pt;color:#555;">{{ $l->reference ?: '' }}</td>
                 <td>{{ $l->designation }}</td>
-                <td class="tc bold">{{ (int) $l->quantite }}</td>
+                <td class="tc bold">{{ rtrim(rtrim(number_format($l->quantite, 2, ',', ' '), '0'), ',') }}</td>
                 <td class="tc">PCS</td>
                 <td class="tr">{{ number_format($l->prix_unitaire, 0, ',', ' ') }}</td>
                 @if($hasRemise)

@@ -8,6 +8,8 @@ use App\Models\Reservation;
 use App\Models\Vehicule;
 use App\Services\ReservationService;
 use Illuminate\Http\Request;
+use App\Models\User;
+use Illuminate\Support\Facades\Auth;
 
 /**
  * Contrôleur des Réservations (RDV Service Rapide).
@@ -23,7 +25,12 @@ class ReservationController extends Controller
 {
     public function index(Request $request)
     {
-        if (! auth()->user()->hasPermission('voir_reservations')) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->hasPermission('voir_reservations')) {
+            abort(403);
+        }
 
         $query = Reservation::with(['client', 'vehicule'])->orderBy('date_rdv')->orderBy('heure_rdv');
 
@@ -49,7 +56,12 @@ class ReservationController extends Controller
      */
     public function planning(Request $request)
     {
-        if (! auth()->user()->hasPermission('voir_reservations')) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->hasPermission('voir_reservations')) {
+            abort(403);
+        }
 
         $date = $request->get('date') ? \Carbon\Carbon::parse($request->get('date')) : now();
         $planning = ReservationService::planningJour($date);
@@ -60,7 +72,12 @@ class ReservationController extends Controller
 
     public function create(Request $request)
     {
-        if (! auth()->user()->hasPermission('gerer_reservations')) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->hasPermission('gerer_reservations')) {
+            abort(403);
+        }
 
         $clients         = Client::orderBy('nom')->get();
         $canalService    = $request->get('canal_service', 'autre');
@@ -79,7 +96,12 @@ class ReservationController extends Controller
 
     public function store(Request $request)
     {
-        if (! auth()->user()->hasPermission('gerer_reservations')) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->hasPermission('gerer_reservations')) {
+            abort(403);
+        }
 
         $data = $request->validate([
             'client_id'     => ['required', 'exists:clients,id'],
@@ -121,7 +143,7 @@ class ReservationController extends Controller
         }
 
         $data['numero']         = Reservation::genererNumero();
-        $data['conseiller_id']  = auth()->id();
+        $data['conseiller_id'] = Auth::id();
         $data['statut']         = 'planifie';
 
         $reservation = Reservation::create($data);
@@ -134,7 +156,12 @@ class ReservationController extends Controller
 
     public function show(Reservation $reservation)
     {
-        if (! auth()->user()->hasPermission('voir_reservations')) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->hasPermission('voir_reservations')) {
+            abort(403);
+        }
         $reservation->load(['client', 'vehicule', 'conseiller', 'dossier']);
         return view('reservations.show', compact('reservation'));
     }
@@ -147,7 +174,12 @@ class ReservationController extends Controller
      */
     public function honorer(Reservation $reservation)
     {
-        if (! auth()->user()->hasPermission('gerer_reservations')) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->hasPermission('gerer_reservations')) {
+            abort(403);
+        }
         if ($reservation->statut !== 'planifie') {
             return back()->with('error', 'Cette réservation n\'est plus active.');
         }
@@ -162,7 +194,12 @@ class ReservationController extends Controller
 
     public function annuler(Reservation $reservation)
     {
-        if (! auth()->user()->hasPermission('gerer_reservations')) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->hasPermission('gerer_reservations')) {
+            abort(403);
+        }
         $reservation->update(['statut' => 'annule']);
         Activite::journaliser('annuler_reservation', "Réservation {$reservation->numero} annulée", $reservation);
         return back()->with('success', 'Réservation annulée.');
@@ -170,9 +207,92 @@ class ReservationController extends Controller
 
     public function marquerNoShow(Reservation $reservation)
     {
-        if (! auth()->user()->hasPermission('gerer_reservations')) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->hasPermission('gerer_reservations')) {
+            abort(403);
+        }
         $reservation->update(['statut' => 'no_show']);
         Activite::journaliser('no_show_reservation', "Réservation {$reservation->numero} — client absent", $reservation);
         return back()->with('success', 'Réservation marquée comme absente (no-show).');
+    }
+
+    /**
+     * Correction administrateur d'une réservation (date, heure, service…), sans
+     * les contrôles de capacité du planning — c'est une correction d'erreur.
+     */
+    public function corriger(Reservation $reservation)
+    {
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->isAdmin()) {
+            abort(403);
+        }
+
+        $reservation->load(['client', 'vehicule']);
+
+        return view('reservations.corriger', [
+            'reservation' => $reservation,
+            'services'    => \App\Services\ReservationService::servicesAutre(),
+        ]);
+    }
+
+    public function enregistrerCorrection(Request $request, Reservation $reservation)
+    {
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->isAdmin()) {
+            abort(403);
+        }
+
+        $data = $request->validate([
+            'canal_service' => ['required', 'in:entretien_periodique,autre'],
+            'service_cle'   => ['nullable', 'required_if:canal_service,autre', 'string'],
+            'tache'         => ['required', 'string', 'max:255'],
+            'date_rdv'      => ['required', 'date'],
+            'heure_rdv'     => ['required', 'date_format:H:i'],
+            'duree_estimee' => ['required', 'numeric', 'min:0.25', 'max:8'],
+            'statut'        => ['required', 'in:planifie,honore,annule,no_show'],
+            'notes'         => ['nullable', 'string'],
+        ], [
+            'service_cle.required_if' => 'Choisissez le service.',
+        ]);
+        if ($data['canal_service'] === 'entretien_periodique') {
+            $data['service_cle'] = null;
+        }
+
+        $reservation->update($data);
+
+        Activite::journaliser('corriger_reservation', "Correction administrateur de la réservation {$reservation->numero}", $reservation);
+
+        return redirect()->route('reservations.show', $reservation)->with('success', 'Réservation corrigée.');
+    }
+
+    /**
+     * Supprime une réservation (administrateur). Son devis en avance, s'il n'a
+     * pas encore été repris par une réception, est supprimé avec elle.
+     */
+    public function supprimer(Reservation $reservation)
+    {
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->isAdmin()) {
+            abort(403);
+        }
+
+        $numero = $reservation->numero;
+        \Illuminate\Support\Facades\DB::transaction(function () use ($reservation) {
+            \App\Models\Devis::where('reservation_id', $reservation->id)
+                ->whereNull('or_id')->whereNull('dossier_id')->get()->each->delete();
+            $reservation->delete();
+        });
+
+        Activite::journaliser('supprimer_reservation', "Suppression par l'administrateur de la réservation {$numero}");
+
+        return redirect()->route('reservations.index')->with('success', "Réservation {$numero} supprimée.");
     }
 }

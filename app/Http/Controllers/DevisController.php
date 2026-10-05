@@ -257,9 +257,13 @@ class DevisController extends Controller
                 |--------------------------------------------------------------------------
                 */
 
-                $ordresReparation->update([
-                    'statut' => 'diagnostic',
-                ]);
+                // Un devis complémentaire (un devis est déjà accepté, travaux
+                // éventuellement en cours) ne fait pas reculer le véhicule.
+                if ($ordresReparation->estAvantAcceptationDevis()) {
+                    $ordresReparation->update([
+                        'statut' => 'diagnostic',
+                    ]);
+                }
 
                 /*
                 |--------------------------------------------------------------------------
@@ -425,19 +429,15 @@ class DevisController extends Controller
     ): View|RedirectResponse {
         $this->verifierPermissionDevis();
 
-        if (
-            !in_array(
-                $devis->statut,
-                [
-                    'brouillon',
-                    'envoye',
-                ],
-                true
-            )
-        ) {
+        // Brouillon / envoyé : modifiable. Accepté / refusé : l'administrateur
+        // seulement (correction d'erreur), jamais une fois l'OR facturé.
+        if (! $devis->estModifiablePar($this->utilisateurConnecte())) {
             return back()->with(
                 'error',
-                'Ce devis ne peut plus être modifié.'
+                $devis->estFige()
+                    ? 'Ce devis ne peut plus être modifié : l\'OR est déjà facturé.'
+                    : 'Ce devis est ' . ($devis->statut === 'accepte' ? 'accepté' : 'refusé')
+                      . ' : seul l\'administrateur peut encore le modifier ou le supprimer.'
             );
         }
 
@@ -446,6 +446,10 @@ class DevisController extends Controller
             'ordreReparation.vehicule',
             'dossier.client',
             'dossier.vehicule',
+            'reservation.client',
+            'reservation.vehicule',
+            'client',
+            'vehicule',
             'lignes',
         ]);
 
@@ -474,19 +478,15 @@ class DevisController extends Controller
     ): RedirectResponse {
         $this->verifierPermissionDevis();
 
-        if (
-            !in_array(
-                $devis->statut,
-                [
-                    'brouillon',
-                    'envoye',
-                ],
-                true
-            )
-        ) {
-            abort(
-                403,
-                'Ce devis ne peut plus être modifié.'
+        // Brouillon / envoyé : modifiable. Accepté / refusé : l'administrateur
+        // seulement (correction d'erreur), jamais une fois l'OR facturé.
+        if (! $devis->estModifiablePar($this->utilisateurConnecte())) {
+            return back()->with(
+                'error',
+                $devis->estFige()
+                    ? 'Ce devis ne peut plus être modifié : l\'OR est déjà facturé.'
+                    : 'Ce devis est ' . ($devis->statut === 'accepte' ? 'accepté' : 'refusé')
+                      . ' : seul l\'administrateur peut encore le modifier ou le supprimer.'
             );
         }
 
@@ -598,19 +598,15 @@ class DevisController extends Controller
     ): RedirectResponse {
         $this->verifierPermissionDevis();
 
-        if (
-            !in_array(
-                $devis->statut,
-                [
-                    'brouillon',
-                    'envoye',
-                ],
-                true
-            )
-        ) {
+        // Brouillon / envoyé : modifiable. Accepté / refusé : l'administrateur
+        // seulement (correction d'erreur), jamais une fois l'OR facturé.
+        if (! $devis->estModifiablePar($this->utilisateurConnecte())) {
             return back()->with(
                 'error',
-                'Un devis accepté ne peut pas être supprimé.'
+                $devis->estFige()
+                    ? 'Ce devis ne peut plus être modifié : l\'OR est déjà facturé.'
+                    : 'Ce devis est ' . ($devis->statut === 'accepte' ? 'accepté' : 'refusé')
+                      . ' : seul l\'administrateur peut encore le modifier ou le supprimer.'
             );
         }
 
@@ -659,9 +655,20 @@ class DevisController extends Controller
                 if (
                     $ordreReparation
                     &&
-                    !$ordreReparation
-                        ->allDevis()
-                        ->exists()
+                    (
+                        !$ordreReparation
+                            ->allDevis()
+                            ->exists()
+                        ||
+                        (
+                            $ordreReparation->statut === 'devis_accepte'
+                            &&
+                            !$ordreReparation
+                                ->allDevis()
+                                ->where('statut', 'accepte')
+                                ->exists()
+                        )
+                    )
                 ) {
                     $ordreReparation->update([
                         'statut' =>
@@ -702,6 +709,16 @@ class DevisController extends Controller
                 );
         }
 
+        // Devis en avance (réservation ou devis libre) : ni OR ni dossier
+        if (! $dossier) {
+            return redirect()
+                ->route('devis.index')
+                ->with(
+                    'success',
+                    'Devis supprimé.'
+                );
+        }
+
         return redirect()
             ->route(
                 'dossiers-reception.show',
@@ -730,6 +747,10 @@ class DevisController extends Controller
             'ordreReparation.vehicule',
             'dossier.client',
             'dossier.vehicule',
+            'reservation.client',
+            'reservation.vehicule',
+            'client',
+            'vehicule',
             'lignes',
         ]);
 
@@ -756,6 +777,10 @@ class DevisController extends Controller
             'ordreReparation.vehicule',
             'dossier.client',
             'dossier.vehicule',
+            'reservation.client',
+            'reservation.vehicule',
+            'client',
+            'vehicule',
             'lignes',
         ]);
 
@@ -779,6 +804,10 @@ class DevisController extends Controller
     ): RedirectResponse {
         $this->verifierPermissionValidationDevis();
 
+        if (! $devis->attendDecision()) {
+            return back()->with('error', "Le devis {$devis->numero} est déjà " . ($devis->statut === 'accepte' ? 'accepté' : 'refusé') . ' : sa décision ne peut plus changer.');
+        }
+
         $devis->load('lignes');
 
         if (
@@ -799,7 +828,8 @@ class DevisController extends Controller
                 now(),
         ]);
 
-        if ($devis->ordreReparation) {
+        // Un devis complémentaire envoyé ne fait pas reculer le véhicule.
+        if ($devis->ordreReparation && $devis->ordreReparation->estAvantAcceptationDevis()) {
             $devis
                 ->ordreReparation
                 ->update([
@@ -834,6 +864,21 @@ class DevisController extends Controller
     ): RedirectResponse {
         $this->verifierPermissionValidationDevis();
 
+        if (! $devis->attendDecision()) {
+            return back()->with('error', "Le devis {$devis->numero} est déjà " . ($devis->statut === 'accepte' ? 'accepté' : 'refusé') . ' : sa décision ne peut plus changer.');
+        }
+
+        // Devis en avance (réservation ou devis libre) : jamais accepté avant la
+        // réception — le jour J, le dossier le reprend, il reste modifiable, puis
+        // il est accepté normalement.
+        if ($devis->estEnAvance()) {
+            return back()->with(
+                'error',
+                'Un devis en avance ne peut pas être accepté : il sera repris, '
+                . 'modifié si besoin et accepté le jour de la réception.'
+            );
+        }
+
         $devis->load('lignes');
 
         if (
@@ -854,7 +899,7 @@ class DevisController extends Controller
         Activite::journaliser(
             'accepter_devis',
             "Devis {$devis->numero} accepté par le client "
-            . "({$devis->montant_ttc} DA TTC)",
+            . "(" . number_format($devis->montant_ttc, 0, ',', ' ') . " FDJ TTC)",
             $devis
         );
 
@@ -877,6 +922,10 @@ class DevisController extends Controller
         Devis $devis
     ): RedirectResponse {
         $this->verifierPermissionValidationDevis();
+
+        if (! $devis->attendDecision()) {
+            return back()->with('error', "Le devis {$devis->numero} est déjà " . ($devis->statut === 'accepte' ? 'accepté' : 'refusé') . ' : sa décision ne peut plus changer.');
+        }
 
         $devis->load('lignes');
 
@@ -907,7 +956,9 @@ class DevisController extends Controller
         |--------------------------------------------------------------------------
         */
 
-        if ($devis->ordreReparation) {
+        // Refus d'un devis complémentaire : le véhicule garde son statut
+        // (le premier devis, déjà accepté, reste valable).
+        if ($devis->ordreReparation && $devis->ordreReparation->estAvantAcceptationDevis()) {
             $devis
                 ->ordreReparation
                 ->update([
@@ -937,10 +988,15 @@ class DevisController extends Controller
             $devis
         );
 
-        return back()->with(
-            'success',
-            'Devis refusé.'
+        // Les pièces ne sont plus à préparer : BC annulé, magasin prévenu
+        $alerteBc = DevisWorkflowService::annulerBonCommande(
+            $devis,
+            "devis {$devis->numero} refusé par le client"
         );
+
+        return back()
+            ->with('success', 'Devis refusé.')
+            ->with('error', $alerteBc);
     }
 
     /*
@@ -952,11 +1008,98 @@ class DevisController extends Controller
     /**
      * Téléverse le devis signé par le client.
      */
+    /**
+     * Correction administrateur : change la décision d'un devis déjà accepté ou
+     * refusé (le client est revenu sur sa décision, erreur de saisie…). Motif
+     * obligatoire, tracé dans le journal.
+     *
+     * - Refusé → accepté : le BC est réactivé et renvoyé au magasin, puis le devis
+     *   est accepté par le circuit normal (OR créé si besoin). Si le magasin doit
+     *   encore confirmer des pièces, le devis repasse « envoyé » en attendant.
+     * - Accepté → refusé : seulement si ses travaux n'ont pas commencé ; BC annulé
+     *   (magasin prévenu) et statut du véhicule ajusté.
+     */
+    public function changerDecision(
+        Request $request,
+        Devis $devis
+    ): RedirectResponse {
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->isAdmin()) {
+            abort(403);
+        }
+
+        $data = $request->validate([
+            'decision' => ['required', 'in:accepte,refuse'],
+            'motif'    => ['required', 'string', 'max:255'],
+        ], [
+            'decision.required' => 'Choisissez la nouvelle décision.',
+            'decision.in'        => 'Décision invalide.',
+            'motif.required'     => 'Indiquez le motif du changement.',
+        ]);
+
+        $devis->load('lignes');
+        if ($raison = $devis->raisonChangementDecisionImpossible($data['decision'])) {
+            return back()->with('error', $raison);
+        }
+
+        $ancien = $devis->getStatutLabel();
+
+        if ($data['decision'] === 'refuse') {
+            $devis->update(['statut' => 'refuse']);
+            $alerte = DevisWorkflowService::annulerBonCommande($devis, "devis {$devis->numero} passé d'accepté à refusé");
+            DevisWorkflowService::apresRefusDevisAccepte($devis);
+            $message = "Devis {$devis->numero} passé à « Refusé ».";
+        } else {
+            // Repasse « envoyé » : le circuit normal d'acceptation s'applique
+            $devis->update(['statut' => 'envoye']);
+            $bc = $devis->bonCommande()->first();
+            if ($bc && $bc->statut === 'annule' && $bc->lignes()->exists()) {
+                $bc->update(['statut' => 'en_attente']);
+                app(\App\Services\FournisseurApiService::class)->envoyerBonCommande($bc->fresh('lignes'));
+            }
+            $devis->load('lignes');
+
+            $alerte = null;
+            if ($devis->attendReponseFournisseur()) {
+                $alerte = 'Le bon de commande a été renvoyé au magasin : le devis repasse « Envoyé » et pourra être accepté dès que le magasin aura confirmé les pièces.';
+                $message = "Devis {$devis->numero} remis à « Envoyé ».";
+            } else {
+                DevisWorkflowService::accepter($devis);
+                $message = "Devis {$devis->numero} passé à « Accepté ».";
+            }
+        }
+
+        Activite::journaliser(
+            'changer_decision_devis',
+            "Devis {$devis->numero} : décision changée de « {$ancien} » à « {$devis->fresh()->getStatutLabel()} » par l'administrateur — motif : {$data['motif']}",
+            $devis
+        );
+
+        return back()->with('success', $message)->with('error', $alerte);
+    }
+
     public function uploadSignature(
         Request $request,
         Devis $devis
     ): RedirectResponse {
         $this->verifierPermissionValidationDevis();
+
+        if (! $devis->attendDecision()) {
+            return back()->with('error', "Le devis {$devis->numero} est déjà " . ($devis->statut === 'accepte' ? 'accepté' : 'refusé') . ' : sa décision ne peut plus changer.');
+        }
+
+        // Devis en avance (réservation ou devis libre) : jamais accepté avant la
+        // réception — le jour J, le dossier le reprend, il reste modifiable, puis
+        // il est accepté normalement.
+        if ($devis->estEnAvance()) {
+            return back()->with(
+                'error',
+                'Un devis en avance ne peut pas être accepté : il sera repris, '
+                . 'modifié si besoin et accepté le jour de la réception.'
+            );
+        }
 
         $devis->load('lignes');
 

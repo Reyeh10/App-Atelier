@@ -32,7 +32,7 @@ class EncaissementGlobalController extends Controller
      */
     public function index()
     {
-      /** @var User|null $user */
+        /** @var User|null $user */
         $user = Auth::user();
 
         if (! $user || ! $user->hasPermission('voir_encaissements')) {
@@ -54,8 +54,7 @@ class EncaissementGlobalController extends Controller
      */
     public function create(Request $request)
     {
-      //  if (! auth()->user()->hasPermission('gerer_encaissements')) abort(403);
-      /** @var User|null $user */
+        /** @var User|null $user */
         $user = Auth::user();
 
         if (! $user || ! $user->hasPermission('gerer_encaissements')) {
@@ -81,15 +80,17 @@ class EncaissementGlobalController extends Controller
                      ->whereNull('marque_garantie_id')
                      ->where('statut', 'emise')
                      ->whereNull('encaissement_global_id')
-                     ->with('ordreReparation')
+                     ->with(['ordreReparation', 'vehicule'])
                      ->orderBy('date_emission')
+                     ->orderBy('id')
                      ->get();
         } elseif ($marqueGarantie) {
             $facturesDisponibles = Facture::where('marque_garantie_id', $marqueGarantie->id)
                      ->where('statut', 'emise')
                      ->whereNull('encaissement_global_id')
-                     ->with('ordreReparation')
+                     ->with(['ordreReparation', 'vehicule'])
                      ->orderBy('date_emission')
+                     ->orderBy('id')
                      ->get();
         }
 
@@ -109,15 +110,12 @@ class EncaissementGlobalController extends Controller
      */
     public function store(Request $request)
     {
-       // if (! auth()->user()->hasPermission('gerer_encaissements')) abort(403);
-
-       /** @var User|null $user */
+        /** @var User|null $user */
         $user = Auth::user();
 
         if (! $user || ! $user->hasPermission('gerer_encaissements')) {
             abort(403);
         }
-
         $request->validate([
             'client_id'          => 'nullable|required_without:marque_garantie_id|exists:clients,id',
             'marque_garantie_id' => 'nullable|required_without:client_id|exists:marques_garantie,id',
@@ -178,13 +176,13 @@ class EncaissementGlobalController extends Controller
      */
     public function show(EncaissementGlobal $encaissementsGlobaux)
     {
-        $eg = $encaissementsGlobaux->load('client', 'marqueGarantie', 'factures.ordreReparation', 'createdBy');
+        $eg = $encaissementsGlobaux->load('client', 'marqueGarantie', 'factures.ordreReparation', 'factures.vehicule', 'createdBy');
         return view('encaissements-globaux.show', compact('eg'));
     }
 
     /**
      * Marque l'encaissement global comme payé et solde toutes ses factures en une opération.
-     * Toutes les factures rattachées passent au statut "payée" avec le même montant payé = montant TTC.
+     * Toutes les factures rattachées passent au statut "payée" avec le même montant payé = total général (TTC + frais de timbre).
      * Bloqué si l'encaissement est déjà marqué payé.
      */
     public function marquerPaye(Request $request, EncaissementGlobal $encaissementsGlobaux)
@@ -209,7 +207,7 @@ class EncaissementGlobalController extends Controller
         $eg->factures()->update([
             'statut'        => 'payee',
             'date_paiement' => $request->date_paiement,
-            'montant_paye' => DB::raw('montant_ttc'),  // montant_paye = montant_ttc pour chaque facture
+            'montant_paye' => DB::raw('montant_ttc + COALESCE(frais_timbre, 0)'),  // total général de chaque facture (timbre compris)
         ]);
 
         return redirect()->route('encaissements-globaux.show', $eg)

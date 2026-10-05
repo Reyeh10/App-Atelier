@@ -6,6 +6,8 @@ use App\Models\Activite;
 use App\Models\Technicien;
 use Illuminate\Http\Request;
 use PhpOffice\PhpSpreadsheet\IOFactory;
+use App\Models\User;
+use Illuminate\Support\Facades\Auth;
 
 /**
  * Contrôleur des Techniciens (mécaniciens).
@@ -21,7 +23,12 @@ class TechnicienController extends Controller
 
     public function index(Request $request)
     {
-        if (! auth()->user()->hasPermission('voir_techniciens')) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->hasPermission('voir_techniciens')) {
+            abort(403);
+        }
 
         $query = Technicien::withCount('ordresReparations')->orderBy('nom');
 
@@ -46,13 +53,23 @@ class TechnicienController extends Controller
 
     public function create()
     {
-        if (! auth()->user()->hasPermission('gerer_techniciens')) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->hasPermission('gerer_techniciens')) {
+            abort(403);
+        }
         return view('techniciens.create');
     }
 
     public function store(Request $request)
     {
-        if (! auth()->user()->hasPermission('gerer_techniciens')) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->hasPermission('gerer_techniciens')) {
+            abort(403);
+        }
 
         $data = $this->validerDonnees($request);
         $technicien = Technicien::create($data + ['actif' => true]);
@@ -64,13 +81,23 @@ class TechnicienController extends Controller
 
     public function edit(Technicien $technicien)
     {
-        if (! auth()->user()->hasPermission('gerer_techniciens')) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->hasPermission('gerer_techniciens')) {
+            abort(403);
+        }
         return view('techniciens.edit', compact('technicien'));
     }
 
     public function update(Request $request, Technicien $technicien)
     {
-        if (! auth()->user()->hasPermission('gerer_techniciens')) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->hasPermission('gerer_techniciens')) {
+            abort(403);
+        }
 
         $data = $this->validerDonnees($request);
         $technicien->update($data);
@@ -86,7 +113,12 @@ class TechnicienController extends Controller
      */
     public function toggleActif(Technicien $technicien)
     {
-        if (! auth()->user()->hasPermission('gerer_techniciens')) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->hasPermission('gerer_techniciens')) {
+            abort(403);
+        }
 
         $technicien->update(['actif' => ! $technicien->actif]);
         $etat = $technicien->actif ? 'réactivé' : 'désactivé';
@@ -101,7 +133,12 @@ class TechnicienController extends Controller
      */
     public function destroy(Technicien $technicien)
     {
-        if (! auth()->user()->hasPermission('gerer_techniciens')) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->hasPermission('gerer_techniciens')) {
+            abort(403);
+        }
 
         if ($technicien->ordresReparations()->exists()) {
             return back()->with('error', "Impossible de supprimer {$technicien->name} : des OR lui sont liés — désactivez-le plutôt.");
@@ -119,7 +156,12 @@ class TechnicienController extends Controller
      */
     public function importForm()
     {
-        if (! auth()->user()->hasPermission('gerer_techniciens')) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->hasPermission('gerer_techniciens')) {
+            abort(403);
+        }
         return view('techniciens.import');
     }
 
@@ -132,7 +174,12 @@ class TechnicienController extends Controller
      */
     public function import(Request $request)
     {
-        if (! auth()->user()->hasPermission('gerer_techniciens')) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->hasPermission('gerer_techniciens')) {
+            abort(403);
+        }
 
         $request->validate([
             'fichier' => ['required', 'file', 'mimes:csv,txt,xlsx,xls', 'max:2048'],

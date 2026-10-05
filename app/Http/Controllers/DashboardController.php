@@ -60,7 +60,7 @@ class DashboardController extends Controller
             ->get();
 
         // ── Bons de commande pièces non encore reçus ──────────────────
-        $bons_commande_en_attente = BonCommande::with(['ordreReparation'])
+        $bons_commande_en_attente = BonCommande::with(['ordreReparation', 'vehiculeDirect'])
             ->whereIn('statut', ['brouillon', 'commande'])
             ->orderByDesc('created_at')
             ->limit(5)
@@ -108,8 +108,7 @@ class DashboardController extends Controller
 
         // ── OR prêts à être facturés, sans facture encore (caissier) ─
         $or_prets_facturer = OrdreReparation::with(['client', 'vehicule'])
-            ->where('statut', 'pret')
-            ->whereDoesntHave('facture')
+            ->aFacturer()
             ->orderBy('date_entree')
             ->get();
 

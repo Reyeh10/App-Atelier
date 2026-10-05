@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Activite;
+use App\Models\Avoir;
 use App\Models\Facture;
 use App\Models\LigneFacture;
 use App\Models\MarqueGarantie;
@@ -30,8 +31,28 @@ class FactureController extends Controller
      */
     public function index(\Illuminate\Http\Request $request)
     {
-        $query = Facture::with(['client', 'marqueGarantie', 'ordreReparation'])
-            ->latest('date_emission');
+        // Classées par numéro, le plus grand en premier : année puis numéro de la
+        // facture (« 101/GARA/2026 » → 2026 puis 101), comparés comme des nombres
+        $query = Facture::with(['client', 'marqueGarantie', 'ordreReparation', 'vehicule'])
+            ->orderByRaw("CAST(SUBSTRING_INDEX(numero, '/', -1) AS UNSIGNED) DESC")
+            ->orderByRaw("CAST(SUBSTRING_INDEX(numero, '/', 1) AS UNSIGNED) DESC");
+
+        // Recherche : n° de facture, client (nom, téléphone), n° d'OR, immatriculation,
+        // marque garantie ou n° de bon de commande client
+        if ($recherche = trim((string) $request->get('recherche'))) {
+            $query->where(function ($q) use ($recherche) {
+                $q->where('numero', 'like', "%{$recherche}%")
+                  ->orWhere('numero_bon_commande_client', 'like', "%{$recherche}%")
+                  ->orWhereHas('client', fn ($c) => $c->where('nom', 'like', "%{$recherche}%")
+                      ->orWhere('prenom', 'like', "%{$recherche}%")
+                      ->orWhere('raison_sociale', 'like', "%{$recherche}%")
+                      ->orWhere('telephone', 'like', "%{$recherche}%"))
+                  ->orWhereHas('ordreReparation', fn ($o) => $o->where('numero', 'like', "%{$recherche}%"))
+                  ->orWhereHas('vehicule', fn ($v) => $v->where('immatriculation', 'like', "%{$recherche}%"))
+                  ->orWhereHas('ordreReparation.vehicule', fn ($v) => $v->where('immatriculation', 'like', "%{$recherche}%"))
+                  ->orWhereHas('marqueGarantie', fn ($m) => $m->where('nom', 'like', "%{$recherche}%"));
+            });
+        }
 
         // Filtre par statut de la facture (emise, payee, annulee...)
         if ($statut = $request->get('statut')) {
@@ -69,9 +90,7 @@ class FactureController extends Controller
     public function aFacturer()
     {
         $orsAFacturer = OrdreReparation::with(['client', 'vehicule', 'allDevis', 'photosOr'])
-            ->where('statut', 'pret')
-            ->where('service_gratuit', false)
-            ->whereDoesntHave('facture')
+            ->aFacturer()
             ->orderBy('date_entree')
             ->get();
 
@@ -92,9 +111,10 @@ class FactureController extends Controller
             abort(403);
         }
 
-        $query = Facture::with(['client', 'ordreReparation'])
+        $query = Facture::with(['client', 'ordreReparation', 'vehicule'])
             ->where('mode_paiement', 'bon_commande')
-            ->latest('date_paiement');
+            ->latest('date_paiement')
+            ->latest('id');
 
         if ($recherche = $request->get('recherche')) {
             $query->where(function ($q) use ($recherche) {
@@ -123,6 +143,14 @@ class FactureController extends Controller
         if (! $user || ! $user->hasPermission('creer_factures')) {
             abort(403);
         }
+        if ($ordresReparation->facture) {
+            return redirect()->route('factures.show', $ordresReparation->facture)
+                ->with('error', "Cet OR a déjà la facture {$ordresReparation->facture->numero}.");
+        }
+        // Même règle que la liste « À facturer », plus les pièces reçues
+        if ($raison = $ordresReparation->raisonNonFacturable()) {
+            return redirect()->route('ordres-reparations.show', $ordresReparation)->with('error', $raison);
+        }
         $ordresReparation->load(['client', 'vehicule', 'allDevis.lignes']);
         return view('factures.create', ['or' => $ordresReparation]);
     }
@@ -144,6 +172,15 @@ class FactureController extends Controller
 
         if (! $user || ! $user->hasPermission('creer_factures')) {
             abort(403);
+        }
+
+        // Une seule facture en vigueur par OR (une facture annulée par avoir ne compte plus)
+        if ($ordresReparation->facture) {
+            return redirect()->route('factures.show', $ordresReparation->facture)
+                ->with('error', "Cet OR a déjà la facture {$ordresReparation->facture->numero}.");
+        }
+        if ($raison = $ordresReparation->raisonNonFacturable()) {
+            return redirect()->route('ordres-reparations.show', $ordresReparation)->with('error', $raison);
         }
 
         $isSociete = in_array($ordresReparation->client->type, ['societe', 'assurance']);
@@ -277,16 +314,19 @@ class FactureController extends Controller
                 LigneFacture::create(array_merge($l, ['facture_id' => $facture->id]));
             }
 
-            // L'OR passe au statut "facturé" et on enregistre la date de sortie réelle
-            $ordresReparation->update([
-                'statut'             => 'facture',
-                'date_sortie_reelle' => now(),
-            ]);
+            // L'OR passe au statut "facturé" et on enregistre la date de sortie réelle —
+            // sauf s'il a déjà été restitué (refacturation après un avoir d'annulation)
+            if ($ordresReparation->statut !== 'livre') {
+                $ordresReparation->update([
+                    'statut'             => 'facture',
+                    'date_sortie_reelle' => now(),
+                ]);
+            }
 
             return $facture;
         });
 
-        Activite::journaliser('creer_facture', "Création facture {$facture->numero} — {$facture->payeur_nom} — {$facture->montant_ttc} FDJ TTC", $facture);
+        Activite::journaliser('creer_facture', "Création facture {$facture->numero} — {$facture->payeur_nom} — " . number_format($facture->montant_ttc, 0, ',', ' ') . " FDJ TTC", $facture);
 
         return redirect()->route('factures.show', $facture)
             ->with('success', "Facture {$facture->numero} créée avec succès.");
@@ -297,7 +337,7 @@ class FactureController extends Controller
      */
     public function show(Facture $facture)
     {
-        $facture->load(['client', 'marqueGarantie', 'ordreReparation.vehicule', 'lignes']);
+        $facture->load(['client', 'marqueGarantie', 'ordreReparation.vehicule', 'vehicule', 'livraisonFlotte.import', 'livraisonFlotte.bonCommande.bonTransfert', 'lignes', 'avoir.factureRemplacement', 'avoirOrigine.facture']);
         return view('factures.show', compact('facture'));
     }
 
@@ -307,7 +347,7 @@ class FactureController extends Controller
      */
     public function imprimer(Facture $facture)
     {
-        $facture->load(['client', 'marqueGarantie', 'lignes', 'ordreReparation.vehicule', 'ordreReparation.devis.bonCommande']);
+        $facture->load(['client', 'marqueGarantie', 'lignes', 'ordreReparation.vehicule', 'ordreReparation.devis.bonCommande', 'vehicule', 'livraisonFlotte.bonCommande.bonTransfert', 'avoir', 'avoirOrigine.facture']);
         return view('factures.print', compact('facture'));
     }
 
@@ -326,8 +366,19 @@ class FactureController extends Controller
         if (! $user || ! $user->hasPermission('encaisser_factures')) {
             abort(403);
         }
+        if ($facture->statut === 'annulee') {
+            return back()->with('error', "Facture {$facture->numero} annulée par avoir : aucun paiement ne peut plus y être enregistré.");
+        }
+
+        // Paiement en plusieurs fois : le montant saisi est le versement du jour,
+        // il s'ajoute à ce qui a déjà été payé (il ne le remplace pas)
+        $resteAvant = round($facture->getMontantRestant());
+        if ($resteAvant <= 0) {
+            return back()->with('error', "Facture {$facture->numero} déjà entièrement payée.");
+        }
+
         $request->validate([
-            'montant_paye'   => ['required', 'numeric', 'min:0'],
+            'montant_paye'   => ['required', 'numeric', 'gt:0', 'max:' . $resteAvant],
             'date_paiement'  => ['required', 'date'],
             'mode_paiement'  => ['required', 'in:especes,cheque,waafi,cac,carte,virement,bon_commande'],
             'numero_bon_commande_client' => ['required_if:mode_paiement,bon_commande', 'nullable', 'string', 'max:100'],
@@ -335,7 +386,8 @@ class FactureController extends Controller
         ], [
             'montant_paye.required'  => 'Le montant payé est obligatoire.',
             'montant_paye.numeric'   => 'Le montant payé doit être un nombre.',
-            'montant_paye.min'        => 'Le montant payé ne peut pas être négatif.',
+            'montant_paye.gt'         => 'Le montant reçu doit être supérieur à zéro.',
+            'montant_paye.max'        => 'Le montant reçu dépasse le reste à payer (' . number_format($resteAvant, 0, ',', ' ') . ' FDJ).',
             'date_paiement.required'  => 'La date de paiement est obligatoire.',
             'date_paiement.date'      => 'La date de paiement n\'est pas valide.',
             'mode_paiement.required'  => 'Veuillez sélectionner le mode de paiement.',
@@ -345,12 +397,15 @@ class FactureController extends Controller
             'bon_commande_scan.max'   => 'Le scan ne doit pas dépasser 10 Mo.',
         ]);
 
+        $versement  = (float) $request->montant_paye;
+        $totalPaye  = (float) $facture->montant_paye + $versement;
+
         $data = [
-            'montant_paye'  => $request->montant_paye,
+            'montant_paye'  => $totalPaye,
             'date_paiement' => $request->date_paiement,
             'mode_paiement' => $request->mode_paiement ?? $facture->mode_paiement,
-            // Facture payée seulement si le montant payé couvre le total
-            'statut'        => $request->montant_paye >= $facture->montant_ttc ? 'payee' : 'emise',
+            // Facture payée seulement quand le total général (TTC + frais de timbre) est couvert
+            'statut'        => $totalPaye >= $facture->totalGeneral() ? 'payee' : 'emise',
         ];
 
         if ($request->mode_paiement === 'bon_commande') {
@@ -365,8 +420,12 @@ class FactureController extends Controller
 
         $facture->update($data);
 
-        Activite::journaliser('payer_facture', "Paiement de {$request->montant_paye} FDJ enregistré sur facture {$facture->numero}", $facture);
-        return back()->with('success', 'Paiement enregistré. Le réceptionniste peut maintenant restituer le véhicule.');
+        $fmt = fn ($m) => number_format($m, 0, ',', ' ');
+        Activite::journaliser('payer_facture', "Versement de {$fmt($versement)} FDJ ({$facture->getModePaiementLabel()}) sur facture {$facture->numero} — payé {$fmt($totalPaye)} / {$fmt($facture->totalGeneral())} FDJ", $facture);
+
+        return back()->with('success', $facture->statut === 'payee'
+            ? 'Facture entièrement payée. Le réceptionniste peut maintenant restituer le véhicule.'
+            : "Versement de {$fmt($versement)} FDJ enregistré — reste à payer : {$fmt($facture->getMontantRestant())} FDJ.");
     }
 
     /**
@@ -381,6 +440,10 @@ class FactureController extends Controller
 
         if (! $user || ! $user->hasPermission('gerer_compte_credit')) {
             abort(403);
+        }
+
+        if ($facture->statut === 'annulee') {
+            return back()->with('error', "Facture {$facture->numero} annulée par avoir.");
         }
 
         $montantRestant = $facture->getMontantRestant();
@@ -434,5 +497,282 @@ class FactureController extends Controller
 
         Activite::journaliser('credit_facture_revoque', "Crédit révoqué sur facture {$facture->numero}", $facture);
         return back()->with('success', 'Crédit révoqué.');
+    }
+
+    // ── Avoirs : annulation / correction d'une facture (administrateur) ──
+
+    /**
+     * Annule une facture par un avoir (administrateur uniquement).
+     * La facture n'est jamais supprimée : un avoir du même montant est émis
+     * automatiquement, la facture passe au statut "annulee" et l'OR revient
+     * dans « À facturer ». Le montant déjà encaissé est indiqué sur l'avoir
+     * (à rembourser au client ou à déduire de la nouvelle facture).
+     */
+    public function annuler(Request $request, Facture $facture)
+    {
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->isAdmin()) {
+            abort(403);
+        }
+        if ($facture->statut === 'annulee') {
+            return back()->with('error', 'Cette facture est déjà annulée.');
+        }
+
+        $request->validate(
+            ['motif' => ['required', 'string', 'max:1000']],
+            ['motif.required' => "Indiquez le motif de l'annulation."]
+        );
+
+        $avoir = DB::transaction(function () use ($request, $facture) {
+            $this->retirerDeLEncaissementNonPaye($facture);
+
+            $avoir = Avoir::pourAnnuler($facture, 'annulation', $request->motif, (float) $facture->montant_paye);
+            $this->marquerAnnulee($facture);
+
+            // Le véhicule redevient « à facturer » (s'il a déjà été restitué, il reste
+            // restitué mais réapparaît quand même dans « À facturer »). Facture flotte :
+            // pas d'OR — la livraison redevient d'elle-même « À facturer ».
+            $or = $facture->ordreReparation;
+            if ($or && $or->statut === 'facture') {
+                $or->update(['statut' => 'pret', 'date_sortie_reelle' => null]);
+            }
+
+            return $avoir;
+        });
+
+        Activite::journaliser('avoir_facture', "Facture {$facture->numero} annulée par l'avoir {$avoir->numero} — motif : {$request->motif}", $facture);
+
+        $message = "Facture {$facture->numero} annulée — avoir {$avoir->numero} émis.";
+        if ($avoir->montant_a_rembourser > 0) {
+            $message .= ' Montant déjà encaissé : ' . number_format($avoir->montant_a_rembourser, 0, ',', ' ') . ' FDJ (à rembourser ou à déduire de la nouvelle facture).';
+        }
+
+        return redirect()->route('factures.show', $facture)->with('success', $message);
+    }
+
+    /**
+     * Formulaire de correction d'une facture (administrateur uniquement) —
+     * reprend les lignes de la facture, modifiables.
+     */
+    public function corriger(Facture $facture)
+    {
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->isAdmin()) {
+            abort(403);
+        }
+        if ($facture->statut === 'annulee') {
+            return redirect()->route('factures.show', $facture)->with('error', 'Cette facture est déjà annulée.');
+        }
+
+        if (! $facture->ordreReparation) {
+            return redirect()->route('factures.show', $facture)->with('error', "Facture flotte : annulez-la par avoir, puis refacturez la livraison depuis l'import flotte.");
+        }
+
+        $facture->load(['lignes', 'client', 'marqueGarantie']);
+        $or = $facture->ordreReparation->load(['client', 'vehicule', 'allDevis.lignes']);
+
+        return view('factures.create', ['or' => $or, 'factureACorriger' => $facture]);
+    }
+
+    /**
+     * Corrige une facture (administrateur uniquement) : un avoir annule la
+     * facture en totalité, puis une nouvelle facture est émise avec les lignes
+     * corrigées. Le paiement déjà reçu et le crédit accordé sont reportés sur la
+     * nouvelle facture ; un éventuel trop-perçu est indiqué sur l'avoir.
+     */
+    public function enregistrerCorrection(Request $request, Facture $facture)
+    {
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->isAdmin()) {
+            abort(403);
+        }
+        if ($facture->statut === 'annulee') {
+            return redirect()->route('factures.show', $facture)->with('error', 'Cette facture est déjà annulée.');
+        }
+        if (! $facture->or_id) {
+            return redirect()->route('factures.show', $facture)->with('error', "Facture flotte : annulez-la par avoir, puis refacturez la livraison depuis l'import flotte.");
+        }
+
+        $request->validate([
+            'motif'                  => ['required', 'string', 'max:1000'],
+            'frais_timbre'           => ['nullable', 'boolean'],
+            'notes'                  => ['nullable', 'string'],
+            'lignes'                 => ['required', 'array', 'min:1'],
+            'lignes.*.type'          => ['required', 'in:main_oeuvre,piece,forfait,autre'],
+            'lignes.*.designation'   => ['required', 'string'],
+            'lignes.*.reference'     => ['nullable', 'string', 'max:100'],
+            'lignes.*.unite'         => ['nullable', 'string', 'max:20'],
+            'lignes.*.quantite'      => ['required', 'numeric', 'min:0.01'],
+            'lignes.*.prix_unitaire' => ['required', 'numeric', 'min:0'],
+            'lignes.*.remise'        => ['nullable', 'numeric', 'min:0', 'max:100'],
+        ], [
+            'motif.required'                => 'Indiquez le motif de la correction.',
+            'lignes.required'               => 'La facture doit contenir au moins une ligne.',
+            'lignes.min'                    => 'La facture doit contenir au moins une ligne.',
+            'lignes.*.designation.required' => 'La désignation est obligatoire pour chaque ligne.',
+            'lignes.*.quantite.min'         => 'La quantité doit être supérieure à zéro.',
+            'lignes.*.prix_unitaire.min'    => 'Le prix unitaire ne peut pas être négatif.',
+            'lignes.*.remise.max'           => 'La remise ne peut pas dépasser 100%.',
+        ]);
+
+        [$avoir, $nouvelle] = DB::transaction(function () use ($request, $facture) {
+            $this->retirerDeLEncaissementNonPaye($facture);
+
+            $lignes = [];
+            foreach ($request->lignes as $ligne) {
+                $remise   = $ligne['remise'] ?? 0;
+                $lignes[] = [
+                    'type'          => $ligne['type'],
+                    'designation'   => $ligne['designation'],
+                    'reference'     => ($ligne['type'] === 'piece') ? ($ligne['reference'] ?? null) : null,
+                    'unite'         => $ligne['unite'] ?? null,
+                    'quantite'      => $ligne['quantite'],
+                    'prix_unitaire' => $ligne['prix_unitaire'],
+                    'remise'        => $remise,
+                    'total_ht'      => round($ligne['quantite'] * $ligne['prix_unitaire'] * (1 - $remise / 100), 2),
+                ];
+            }
+
+            // Même taux et même arrondi FDJ que pour une facture normale
+            $tauxTva = 10;
+            [$montantHt, $tva, $ttc] = ArrondiFdjService::arrondir($lignes, $tauxTva);
+            $timbre = $request->boolean('frais_timbre') ? 1000 : 0;
+
+            // Paiement déjà reçu : reporté sur la nouvelle facture, dans la limite
+            // de son montant — le surplus éventuel est à rembourser (noté sur l'avoir)
+            $dejaPaye  = (float) $facture->montant_paye;
+            $reporte   = min($dejaPaye, $ttc + $timbre);
+            $tropPercu = round(max(0, $dejaPaye - ($ttc + $timbre)), 2);
+            $estPayee  = $reporte > 0 && $reporte >= $ttc + $timbre;
+
+            // Crédit accordé (compte client ou garantie constructeur) : reporté aussi
+            $credit = [
+                'credit_accorde'     => (bool) $facture->credit_accorde,
+                'credit_accorde_at'  => $facture->credit_accorde_at,
+                'credit_accorde_par' => $facture->credit_accorde_par,
+            ];
+
+            $avoir = Avoir::pourAnnuler($facture, 'correction', $request->motif, $tropPercu);
+            $this->marquerAnnulee($facture);
+
+            $nouvelle = Facture::create(array_merge([
+                'numero'                           => Facture::genererNumero(),
+                'or_id'                            => $facture->or_id,
+                'devis_id'                         => $facture->devis_id,
+                'client_id'                        => $facture->client_id,
+                'marque_garantie_id'               => $facture->marque_garantie_id,
+                'statut'                           => $estPayee ? 'payee' : 'emise',
+                'mode_paiement'                    => $reporte > 0 ? $facture->mode_paiement : null,
+                'numero_bon_commande_client'       => $facture->numero_bon_commande_client,
+                'bon_commande_client_chemin'       => $facture->bon_commande_client_chemin,
+                'bon_commande_client_nom_original' => $facture->bon_commande_client_nom_original,
+                'date_emission'                    => now(),
+                'date_echeance'                    => $facture->date_echeance,
+                'date_paiement'                    => $reporte > 0 ? $facture->date_paiement : null,
+                'notes'                            => $request->notes,
+                'frais_timbre'                     => $timbre,
+                'montant_ht'                       => $montantHt,
+                'taux_tva'                         => $tauxTva,
+                'montant_tva'                      => $tva,
+                'montant_ttc'                      => $ttc,
+                'montant_paye'                     => $reporte,
+            ], $credit));
+
+            foreach ($lignes as $l) {
+                LigneFacture::create(array_merge($l, ['facture_id' => $nouvelle->id]));
+            }
+
+            $avoir->update(['facture_remplacement_id' => $nouvelle->id]);
+
+            return [$avoir, $nouvelle];
+        });
+
+        Activite::journaliser('avoir_facture', "Facture {$facture->numero} corrigée : avoir {$avoir->numero} + nouvelle facture {$nouvelle->numero} (" . number_format($nouvelle->montant_ttc, 0, ',', ' ') . " FDJ TTC) — motif : {$request->motif}", $nouvelle);
+
+        $message = "Facture {$facture->numero} annulée par l'avoir {$avoir->numero} et remplacée par la facture {$nouvelle->numero}.";
+        if ($avoir->montant_a_rembourser > 0) {
+            $message .= ' Trop-perçu à rembourser au client : ' . number_format($avoir->montant_a_rembourser, 0, ',', ' ') . ' FDJ.';
+        }
+
+        return redirect()->route('factures.show', $nouvelle)->with('success', $message);
+    }
+
+    /** Liste des avoirs émis */
+    public function avoirs()
+    {
+        $avoirs = Avoir::with(['client', 'marqueGarantie', 'facture', 'factureRemplacement', 'ordreReparation', 'creePar'])
+            ->latest('id')
+            ->paginate(30);
+
+        return view('factures.avoirs', compact('avoirs'));
+    }
+
+    /** Impression d'un avoir (format A4, même présentation que la facture) */
+    public function imprimerAvoir(Avoir $avoir)
+    {
+        $avoir->load(['client', 'marqueGarantie', 'lignes', 'facture.vehicule', 'facture.livraisonFlotte.bonCommande', 'factureRemplacement', 'ordreReparation.vehicule']);
+        return view('factures.avoir-print', compact('avoir'));
+    }
+
+    /**
+     * Enregistre le remboursement au client du montant indiqué sur l'avoir
+     * (ou sa déduction sur la nouvelle facture) — solde l'avoir.
+     */
+    public function rembourserAvoir(Request $request, Avoir $avoir)
+    {
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->hasPermission('encaisser_factures')) {
+            abort(403);
+        }
+        if (! $avoir->resteARembourser()) {
+            return back()->with('error', "Rien à rembourser sur l'avoir {$avoir->numero}.");
+        }
+
+        $request->validate([
+            'rembourse_le'       => ['required', 'date'],
+            'mode_remboursement' => ['required', 'in:especes,cheque,waafi,virement,deduit'],
+        ], [
+            'rembourse_le.required'       => 'La date du remboursement est obligatoire.',
+            'mode_remboursement.required' => 'Choisissez le mode de remboursement.',
+        ]);
+
+        $avoir->update($request->only('rembourse_le', 'mode_remboursement'));
+
+        Activite::journaliser('avoir_rembourse', "Avoir {$avoir->numero} : " . number_format($avoir->montant_a_rembourser, 0, ',', ' ') . " FDJ remboursés ({$avoir->getModeRemboursementLabel()})", $avoir->facture);
+
+        return back()->with('success', "Remboursement de l'avoir {$avoir->numero} enregistré.");
+    }
+
+    /** Passe la facture au statut "annulee" (le crédit accordé ne compte plus) */
+    private function marquerAnnulee(Facture $facture): void
+    {
+        $facture->update([
+            'statut'             => 'annulee',
+            'credit_accorde'     => false,
+            'credit_accorde_at'  => null,
+            'credit_accorde_par' => null,
+        ]);
+    }
+
+    /**
+     * Retire la facture d'un encaissement groupé encore non payé (sinon le
+     * paiement de l'encaissement la repasserait en "payée") et en déduit le
+     * montant. Un encaissement déjà payé garde la facture dans son historique.
+     */
+    private function retirerDeLEncaissementNonPaye(Facture $facture): void
+    {
+        $eg = $facture->encaissementGlobal;
+        if ($eg && $eg->statut !== 'paye') {
+            $eg->update(['montant_total' => max(0, (float) $eg->montant_total - $facture->totalGeneral())]);
+            $facture->update(['encaissement_global_id' => null]);
+        }
     }
 }

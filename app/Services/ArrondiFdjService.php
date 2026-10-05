@@ -15,41 +15,82 @@ namespace App\Services;
 class ArrondiFdjService
 {
     /**
-     * Ajuste le prix unitaire de la ligne la plus chère pour que le total TTC
-     * final soit un multiple de 5 FDJ.
+     * Arrondit les prix au franc puis ajuste le prix unitaire d'une ligne, par
+     * francs entiers, pour que le total TTC final soit un multiple de 5 FDJ.
+     * Aucun prix ni total ne garde de décimales ; seules la quantité (heures,
+     * litres...) et la remise peuvent en avoir.
      *
-     * Modifie $lignes par référence (prix_unitaire/total_ht de la ligne
-     * choisie) et retourne les montants recalculés : [montant_ht, montant_tva,
-     * montant_ttc].
+     * On cherche le plus petit ajustement possible (+1, -1, +2, -2... francs),
+     * en essayant d'abord les lignes à quantité 1, puis la plus chère.
+     *
+     * Modifie $lignes par référence (prix_unitaire/total_ht) et retourne les
+     * montants recalculés : [montant_ht, montant_tva, montant_ttc].
      *
      * @param array<int, array{quantite: float, prix_unitaire: float, remise: float, total_ht: float}> $lignes
      */
     public static function arrondir(array &$lignes, float $tauxTva): array
     {
-        $montantHt = array_sum(array_column($lignes, 'total_ht'));
-        $tva       = round($montantHt * $tauxTva / 100, 2);
-        $ttcBrut   = $montantHt + $tva;
-        $ttcCible  = round($ttcBrut / 5) * 5;
-        $delta     = round($ttcCible - $ttcBrut, 2);
+        foreach ($lignes as &$ligne) {
+            $ligne['prix_unitaire'] = round((float) $ligne['prix_unitaire']);
+            $ligne['total_ht']      = self::totalLigne($ligne);
+        }
+        unset($ligne);
 
-        if ($delta != 0.0 && ! empty($lignes)) {
-            // Ligne la plus chère : minimise la distorsion relative et évite un prix négatif.
-            $totaux     = array_column($lignes, 'total_ht');
-            $indexCible = array_search(max($totaux), $totaux);
-            $deltaHt    = round($delta / (1 + $tauxTva / 100), 2);
-
-            $ligne    = &$lignes[$indexCible];
-            $diviseur = $ligne['quantite'] * (1 - $ligne['remise'] / 100);
-            if ($diviseur > 0) {
-                $ligne['total_ht']      = round($ligne['total_ht'] + $deltaHt, 2);
-                $ligne['prix_unitaire'] = round($ligne['total_ht'] / $diviseur, 2);
-            }
-            unset($ligne);
-
-            $montantHt = array_sum(array_column($lignes, 'total_ht'));
-            $tva       = round($montantHt * $tauxTva / 100, 2);
+        $montants = self::montants($lignes, $tauxTva);
+        if ($montants[2] % 5 === 0 || empty($lignes)) {
+            return $montants;
         }
 
-        return [$montantHt, $tva, round($montantHt + $tva, 2)];
+        $ordre = array_keys($lignes);
+        // Lignes à quantité 1 sans remise d'abord (le prix reste un prix « rond » par
+        // unité, ex : une pièce), puis de la plus chère à la moins chère
+        $simple = fn ($l) => (float) $l['quantite'] == 1.0 && (float) ($l['remise'] ?? 0) == 0.0;
+        usort($ordre, fn ($a, $b) => [$simple($lignes[$b]), $lignes[$b]['total_ht']] <=> [$simple($lignes[$a]), $lignes[$a]['total_ht']]);
+
+        // Le plus petit ajustement d'abord (1 franc, puis 2...), sur la ligne la
+        // plus chère qui le permet
+        for ($pas = 1; $pas <= 100; $pas++) {
+            foreach ($ordre as $index) {
+                $diviseur = (float) $lignes[$index]['quantite'] * (1 - (float) ($lignes[$index]['remise'] ?? 0) / 100);
+                if ($diviseur <= 0) {
+                    continue;
+                }
+                foreach ([$pas, -$pas] as $delta) {
+                    $prix = $lignes[$index]['prix_unitaire'] + $delta;
+                    if ($prix < 0) {
+                        continue;
+                    }
+                    $essai = $lignes;
+                    $essai[$index]['prix_unitaire'] = $prix;
+                    $essai[$index]['total_ht']      = self::totalLigne($essai[$index]);
+                    $resultat = self::montants($essai, $tauxTva);
+                    if ($resultat[2] % 5 === 0) {
+                        $lignes = $essai;
+                        return $resultat;
+                    }
+                }
+            }
+        }
+
+        return $montants;
+    }
+
+    /** Total HT d'une ligne, au franc */
+    private static function totalLigne(array $ligne): float
+    {
+        return round((float) $ligne['quantite'] * (float) $ligne['prix_unitaire'] * (1 - (float) ($ligne['remise'] ?? 0) / 100));
+    }
+
+    /**
+     * [HT, TVA, TTC] au franc.
+     *
+     * @return array{0:int, 1:int, 2:int}
+     */
+    private static function montants(array $lignes, float $tauxTva): array
+    {
+        $ht  = (int) round(array_sum(array_column($lignes, 'total_ht')));
+        $tva = (int) round($ht * $tauxTva / 100);
+
+        return [$ht, $tva, $ht + $tva];
     }
 }

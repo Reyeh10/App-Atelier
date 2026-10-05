@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Client;
 use App\Models\Facture;
+use App\Models\LigneFacture;
 use App\Models\OrdreReparation;
 use App\Models\Technicien;
 use App\Models\User;
@@ -154,6 +155,18 @@ class RapportController extends Controller
         $nbEmises    = $factureBase()->where('statut', 'emise')->count();
         $caTotal     = $caEncaisse + $caEnAttente;
 
+        // Totaux pièces / main-d'œuvre : lignes des factures de la période
+        // (émises ou payées — les factures annulées par avoir ne comptent pas), en HT
+        $lignesPeriode = fn () => LigneFacture::query()
+            ->join('factures', 'factures.id', '=', 'lignes_facture.facture_id')
+            ->whereIn('factures.statut', ['emise', 'payee'])
+            ->when($debut, fn ($q) => $q->where('factures.date_emission', '>=', $debut));
+
+        $totalPiecesHt = (float) $lignesPeriode()->where('lignes_facture.type', 'piece')->sum('lignes_facture.total_ht');
+        $qtePieces     = (float) $lignesPeriode()->where('lignes_facture.type', 'piece')->sum('lignes_facture.quantite');
+        $totalMoHt     = (float) $lignesPeriode()->where('lignes_facture.type', 'main_oeuvre')->sum('lignes_facture.total_ht');
+        $heuresMo      = (float) $lignesPeriode()->where('lignes_facture.type', 'main_oeuvre')->sum('lignes_facture.quantite');
+
         // Évolution du CA encaissé mois par mois (année civile en cours)
         $evolutionCA = [];
         for ($m = 1; $m <= 12; $m++) {
@@ -179,6 +192,7 @@ class RapportController extends Controller
             'conseillers',
             'evolution', 'maxEvo',
             'caEncaisse', 'caEnAttente', 'caTotal', 'nbPayees', 'nbEmises',
+            'totalPiecesHt', 'qtePieces', 'totalMoHt', 'heuresMo',
             'evolutionCA', 'maxCA',
             'dernieres_receptions'
         ));

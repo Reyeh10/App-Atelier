@@ -11,7 +11,7 @@ class ParametreAtelier extends Model
 
     protected $fillable = [
         'heure_debut', 'heure_fin', 'capacite_service_rapide_simultanee', 'tarifs_service_rapide',
-        'controle_qualite_technicien_id',
+        'controle_qualite_technicien_id', 'main_oeuvre_flotte',
     ];
 
     protected $casts = ['tarifs_service_rapide' => 'array'];

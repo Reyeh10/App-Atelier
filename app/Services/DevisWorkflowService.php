@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Activite;
 use App\Models\BonCommande;
 use App\Models\Devis;
 use App\Models\LigneBonCommande;
@@ -28,7 +29,26 @@ class DevisWorkflowService
             'date_validation' => now(),
         ], $attributsSupplementaires));
 
-        $devis->ordreReparation->update(['statut' => 'devis_accepte']);
+        // Statut du véhicule : « Devis accepté » tant que les travaux n'ont pas
+        // commencé. Un devis complémentaire accepté pendant les travaux ne le
+        // fait pas reculer ; s'il arrive après la fin des travaux (contrôle
+        // qualité, lavage, prêt), le véhicule repasse « En cours » pour sa
+        // nouvelle feuille de travail. Facturé / livré / annulé : inchangé.
+        $or = $devis->ordreReparation;
+        if (! $or) {
+            // Filet de sécurité : un devis en avance (sans OR ni dossier) n'est
+            // jamais accepté — DevisController::accepter() / uploadSignature()
+            // le refusent. Il est accepté après la réception, une fois repris
+            // par le dossier (cf. DossierReceptionController::store()).
+            $devis->load('lignes');
+            self::genererBonCommande($devis);
+            return;
+        }
+        if ($or->estAvantAcceptationDevis() || $or->statut === 'devis_accepte') {
+            $or->update(['statut' => 'devis_accepte']);
+        } elseif (in_array($or->statut, ['controle_qualite', 'lavage', 'pret'], true)) {
+            $or->update(['statut' => 'en_cours']);
+        }
         $devis->load('lignes');
         // Filet de sécurité : dans le flux normal, le BC est déjà parti au
         // fournisseur dès la création du devis (cf. genererBonCommande()
@@ -90,8 +110,62 @@ class DevisWorkflowService
      * préserve de même une pièce déjà identifiée par un vendeur — seule la
      * quantité demandée est mise à jour pour elle.
      */
+    /**
+     * Annule le bon de commande du devis (devis refusé, ou plus aucune pièce) et
+     * prévient le magasin. Un BC déjà reçu, ou dont le magasin a déjà fait le
+     * BT (pièces sorties du stock), n'est pas annulé : les pièces sont à rendre
+     * au magasin. Renvoie un message à afficher, ou null si rien à signaler.
+     */
+    public static function annulerBonCommande(Devis $devis, string $motif): ?string
+    {
+        $bc = $devis->bonCommande()->first();
+        if (! $bc || $bc->statut === 'annule') {
+            return null;
+        }
+        if ($bc->statut === 'recu' || $bc->bonTransfert()->exists()) {
+            return "Le bon de commande {$bc->numero} n'est pas annulé : le magasin a déjà sorti les pièces (BT). Retournez-les au magasin.";
+        }
+
+        $bc->update(['statut' => 'annule']);
+        Activite::journaliser('annuler_bon_commande', "Bon de commande {$bc->numero} annulé — {$motif}", $bc);
+        app(\App\Services\FournisseurApiService::class)->annulerBonCommande($bc, $motif);
+
+        return null;
+    }
+
+    /**
+     * Un devis accepté vient d'être refusé (correction administrateur) : le
+     * véhicule revient au diagnostic s'il n'a plus aucun devis accepté ; si seul
+     * un devis complémentaire est retiré et que tout le reste est terminé, il
+     * repasse au contrôle qualité.
+     */
+    public static function apresRefusDevisAccepte(Devis $devis): void
+    {
+        $or = $devis->ordreReparation()->first();
+        if (! $or) {
+            return;
+        }
+        $or->load('allDevis');
+
+        if ($or->devisAcceptes()->isEmpty()) {
+            if (in_array($or->statut, ['devis_accepte', 'en_cours'], true)) {
+                $or->update(['statut' => 'diagnostic']);
+            }
+            return;
+        }
+        if ($or->statut === 'en_cours' && $or->heure_fin_travaux && $or->feuillesComplementairesTerminees()) {
+            $or->update(['statut' => $or->service_gratuit ? 'pret' : 'controle_qualite']);
+        }
+    }
+
     public static function resynchroniserBonCommande(Devis $devis): void
     {
+        // Devis refusé (corrigé par l'administrateur) : ses pièces ne sont plus à
+        // commander — son BC reste annulé et le magasin n'est pas relancé.
+        if ($devis->statut === 'refuse') {
+            return;
+        }
+
         $bc = $devis->bonCommande;
         if (! $bc) {
             self::genererBonCommande($devis);
@@ -101,16 +175,26 @@ class DevisWorkflowService
         $pieces = $devis->lignes->where('type', 'piece');
         if ($pieces->isEmpty()) {
             $bc->lignes()->delete();
+            self::annulerBonCommande($devis, 'plus aucune pièce dans le devis');
             return;
+        }
+
+        // Des pièces reviennent dans le devis : le BC annulé redevient actif
+        if ($bc->statut === 'annule') {
+            $bc->update(['statut' => 'en_attente']);
         }
 
         $bc->load('lignes');
         $lignesExistantes = $bc->lignes->keyBy('designation');
 
         $gardees = [];
+        $aRecevoir = [];   // pièces nouvelles ou dont la quantité a changé
         foreach ($pieces as $ligneDevis) {
             $ligneBc = $lignesExistantes->get($ligneDevis->designation);
             if ($ligneBc) {
+                if ((float) $ligneBc->quantite !== (float) $ligneDevis->quantite) {
+                    $aRecevoir[] = $ligneBc->id;
+                }
                 $ligneBc->update([
                     'ligne_devis_id' => $ligneDevis->id,
                     'reference'      => $ligneDevis->reference ?: $ligneBc->reference,
@@ -126,11 +210,19 @@ class DevisWorkflowService
                     'quantite'        => $ligneDevis->quantite,
                 ]);
                 $gardees[] = $nouvelle->id;
+                $aRecevoir[] = $nouvelle->id;
             }
         }
 
         // Pièces retirées du devis : plus lieu d'être commandées.
         $bc->lignes()->whereNotIn('id', $gardees)->delete();
+
+        // BC déjà reçu dont les pièces changent (devis modifié après le BT) : les
+        // pièces concernées sont à recevoir de nouveau, avec le BT mis à jour.
+        if ($aRecevoir && $bc->statut === 'recu') {
+            $bc->lignes()->whereIn('id', $aRecevoir)->update(['recu' => false]);
+            $bc->update(['statut' => 'commande']);
+        }
 
         app(\App\Services\FournisseurApiService::class)->envoyerBonCommande($bc->fresh('lignes'));
     }

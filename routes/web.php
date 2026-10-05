@@ -10,10 +10,12 @@ use App\Http\Controllers\BonCommandeController;
 use App\Http\Controllers\GarantieController;
 use App\Http\Controllers\ClientController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DevisAvanceController;
 use App\Http\Controllers\DevisController;
 use App\Http\Controllers\DossierReceptionController;
 use App\Http\Controllers\EncaissementGlobalController;
 use App\Http\Controllers\FactureController;
+use App\Http\Controllers\FlotteController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\OrdreReparationController;
 use App\Http\Controllers\PermissionController;
@@ -23,6 +25,7 @@ use App\Http\Controllers\ParametreAtelierController;
 use App\Http\Controllers\RechercheController;
 use App\Http\Controllers\ReceptionController;
 use App\Http\Controllers\ReservationController;
+use App\Http\Controllers\SurveillanceAtelierController;
 use App\Http\Controllers\TechnicienController;
 use App\Http\Controllers\UtilisateurController;
 use App\Http\Controllers\VehiculeController;
@@ -105,6 +108,7 @@ Route::middleware('auth')->group(function () {
                     'vin'                => $v->vin,
                     'kilometrage'        => $v->kilometrage,
                     'type_moteur_id'     => $v->type_moteur_id,
+                    'date_mise_circulation' => $v->date_mise_circulation?->format('Y-m-d'),
                     // Éligibilité réelle (garantie + catégorie/âge/km + jamais signalé
                     // "sorti") — pas seulement le champ sous_garantie brut, cf.
                     // Vehicule::estEligibleGarantie(). Même logique que le rendu
@@ -150,6 +154,15 @@ Route::middleware('auth')->group(function () {
         Route::patch('/reservations/{reservation}/annuler',   [ReservationController::class, 'annuler'])->name('reservations.annuler');
         Route::patch('/reservations/{reservation}/no-show',   [ReservationController::class, 'marquerNoShow'])->name('reservations.no-show');
     });
+    // Corrections administrateur — réservations et dossiers de réception
+    Route::middleware('admin')->group(function () {
+        Route::get('/reservations/{reservation}/corriger',       [ReservationController::class, 'corriger'])->name('reservations.corriger');
+        Route::put('/reservations/{reservation}/corriger',       [ReservationController::class, 'enregistrerCorrection'])->name('reservations.corriger.enregistrer');
+        Route::delete('/reservations/{reservation}',             [ReservationController::class, 'supprimer'])->name('reservations.supprimer');
+        Route::get('/dossiers-reception/{dossier}/corriger',     [DossierReceptionController::class, 'corriger'])->name('dossiers-reception.corriger');
+        Route::put('/dossiers-reception/{dossier}/corriger',     [DossierReceptionController::class, 'enregistrerCorrection'])->name('dossiers-reception.corriger.enregistrer');
+    });
+
     Route::middleware('perm:voir_reservations')->group(function () {
         Route::get('/reservations',              [ReservationController::class, 'index'])->name('reservations.index');
         Route::get('/reservations/planning',     [ReservationController::class, 'planning'])->name('reservations.planning');
@@ -160,12 +173,14 @@ Route::middleware('auth')->group(function () {
     // create doit être avant {ordresReparation}
     Route::get('/ordres-reparations/create', [OrdreReparationController::class, 'create'])->name('ordres-reparations.create')->middleware('perm:creer_ordres');
     Route::get('/ordres-reparations',        [OrdreReparationController::class, 'index'])->name('ordres-reparations.index')->middleware('perm:voir_ordres');
+    Route::get('/surveillance-atelier',      [SurveillanceAtelierController::class, 'index'])->name('surveillance-atelier.index')->middleware('perm:voir_ordres');
     Route::post('/ordres-reparations',       [OrdreReparationController::class, 'store'])->name('ordres-reparations.store')->middleware('perm:creer_ordres');
 
     Route::middleware('perm:voir_ordres')->group(function () {
         Route::get('/ordres-reparations/{ordresReparation}',                   [OrdreReparationController::class, 'show'])->name('ordres-reparations.show');
         Route::get('/ordres-reparations/{ordresReparation}/imprimer',          [OrdreReparationController::class, 'imprimer'])->name('ordres-reparations.imprimer');
         Route::get('/ordres-reparations/{ordresReparation}/feuille-travail',   [OrdreReparationController::class, 'feuilletTravail'])->name('ordres-reparations.feuille-travail');
+        Route::get('/ordres-reparations/{ordresReparation}/feuille-travail/{devis}', [OrdreReparationController::class, 'feuilletTravail'])->name('ordres-reparations.feuille-travail.devis');
     });
 
     // Ces routes délèguent le contrôle d'accès à leur permission spécifique
@@ -179,6 +194,16 @@ Route::middleware('auth')->group(function () {
         Route::patch('/ordres-reparations/{ordresReparation}/affecter',        [OrdreReparationController::class, 'affecter'])->name('ordres-reparations.affecter');
         Route::patch('/ordres-reparations/{ordresReparation}/demarrer',        [OrdreReparationController::class, 'demarrerTravaux'])->name('ordres-reparations.demarrer');
         Route::patch('/ordres-reparations/{ordresReparation}/terminer',        [OrdreReparationController::class, 'terminerTravaux'])->name('ordres-reparations.terminer');
+        // Feuilles de travail des devis complémentaires (une par devis accepté)
+        Route::patch('/ordres-reparations/{ordresReparation}/feuilles/{devis}/affecter', [OrdreReparationController::class, 'affecterFeuille'])->name('ordres-reparations.feuilles.affecter');
+        Route::patch('/ordres-reparations/{ordresReparation}/feuilles/{devis}/demarrer', [OrdreReparationController::class, 'demarrerFeuille'])->name('ordres-reparations.feuilles.demarrer');
+        Route::patch('/ordres-reparations/{ordresReparation}/feuilles/{devis}/terminer', [OrdreReparationController::class, 'terminerFeuille'])->name('ordres-reparations.feuilles.terminer');
+        // Corrections administrateur (erreur de saisie) — sauf OR facturé pour la suppression
+        Route::middleware('admin')->group(function () {
+            Route::get('/ordres-reparations/{ordresReparation}/corriger', [OrdreReparationController::class, 'corriger'])->name('ordres-reparations.corriger');
+            Route::put('/ordres-reparations/{ordresReparation}/corriger', [OrdreReparationController::class, 'enregistrerCorrection'])->name('ordres-reparations.corriger.enregistrer');
+            Route::delete('/ordres-reparations/{ordresReparation}',       [OrdreReparationController::class, 'supprimer'])->name('ordres-reparations.supprimer');
+        });
         Route::patch('/ordres-reparations/{ordresReparation}/valider-qualite', [OrdreReparationController::class, 'validerQualite'])->name('ordres-reparations.valider-qualite');
         Route::patch('/ordres-reparations/{ordresReparation}/terminer-lavage', [OrdreReparationController::class, 'terminerLavage'])->name('ordres-reparations.terminer-lavage');
         Route::get('/ordres-reparations/{ordresReparation}/restitution',        [OrdreReparationController::class, 'restitution'])->name('ordres-reparations.restitution');
@@ -206,6 +231,9 @@ Route::middleware('auth')->group(function () {
     });
     Route::middleware('perm:gerer_devis')->group(function () {
         Route::get('/ordres-reparations/{ordresReparation}/devis/creer',  [DevisController::class, 'create'])->name('devis.create');
+        // Devis en avance (depuis une réservation, ou devis libre) — sans réception
+        Route::get('/devis-en-avance/creer',                              [DevisAvanceController::class, 'create'])->name('devis-avance.create');
+        Route::post('/devis-en-avance',                                   [DevisAvanceController::class, 'store'])->name('devis-avance.store');
         Route::post('/ordres-reparations/{ordresReparation}/devis',       [DevisController::class, 'store'])->name('devis.store');
         Route::get('/devis/{devis}/modifier',                             [DevisController::class, 'edit'])->name('devis.edit');
         Route::put('/devis/{devis}',                                      [DevisController::class, 'update'])->name('devis.update');
@@ -220,6 +248,8 @@ Route::middleware('auth')->group(function () {
         Route::patch('/devis/{devis}/accepter',         [DevisController::class, 'accepter'])->name('devis.accepter');
         Route::patch('/devis/{devis}/refuser',          [DevisController::class, 'refuser'])->name('devis.refuser');
         Route::patch('/devis/{devis}/upload-signature', [DevisController::class, 'uploadSignature'])->name('devis.upload-signature');
+        // Correction administrateur : accepté ↔ refusé
+        Route::patch('/devis/{devis}/changer-decision', [DevisController::class, 'changerDecision'])->name('devis.changer-decision')->middleware('admin');
     });
 
     // ── Factures ──────────────────────────────────────────────
@@ -235,6 +265,17 @@ Route::middleware('auth')->group(function () {
         Route::post('/ordres-reparations/{ordresReparation}/facture',      [FactureController::class, 'store'])->name('factures.store');
     });
     Route::patch('/factures/{facture}/payer',          [FactureController::class, 'marquerPayee'])->name('factures.payer')->middleware('perm:encaisser_factures');
+    // Avoirs : annuler ou corriger une facture émise (administrateur uniquement)
+    Route::middleware('admin')->group(function () {
+        Route::patch('/factures/{facture}/annuler',        [FactureController::class, 'annuler'])->name('factures.annuler');
+        Route::get('/factures/{facture}/corriger',         [FactureController::class, 'corriger'])->name('factures.corriger');
+        Route::put('/factures/{facture}/corriger',         [FactureController::class, 'enregistrerCorrection'])->name('factures.corriger.enregistrer');
+    });
+    Route::middleware('perm:voir_factures')->group(function () {
+        Route::get('/avoirs',                              [FactureController::class, 'avoirs'])->name('avoirs.index');
+        Route::get('/avoirs/{avoir}/imprimer',             [FactureController::class, 'imprimerAvoir'])->name('avoirs.imprimer');
+    });
+    Route::patch('/avoirs/{avoir}/rembourser',             [FactureController::class, 'rembourserAvoir'])->name('avoirs.rembourser')->middleware('perm:encaisser_factures');
     Route::middleware('perm:gerer_compte_credit')->group(function () {
         Route::patch('/factures/{facture}/credit',         [FactureController::class, 'accorderCredit'])->name('factures.credit');
         Route::patch('/factures/{facture}/revoquer-credit',[FactureController::class, 'revoquerCredit'])->name('factures.revoquer-credit');
@@ -254,11 +295,34 @@ Route::middleware('auth')->group(function () {
     // ── Bons de commande (suivi disponibilité fournisseur) ─────
     Route::middleware('perm:voir_bons_commande')->group(function () {
         Route::get('/bons-commande',                               [BonCommandeController::class, 'index'])->name('bons-commande.index');
+        Route::get('/bons-commande/{bonCommande}/bon-transfert', [BonCommandeController::class, 'voirBonTransfert'])->name('bons-commande.bon-transfert');
         Route::get('/bons-commande/{bonCommande}',                 [BonCommandeController::class, 'show'])->name('bons-commande.show');
     });
     Route::middleware('perm:gerer_bons_commande')->group(function () {
+        Route::post('/bons-commande/{bonCommande}/bon-transfert',                  [BonCommandeController::class, 'enregistrerBonTransfert'])->name('bons-commande.bon-transfert.enregistrer');
         Route::patch('/bons-commande/{bonCommande}/recevoir',                      [BonCommandeController::class, 'marquerRecu'])->name('bons-commande.recevoir');
         Route::patch('/bons-commande/{bonCommande}/ligne/{ligneId}/recu',          [BonCommandeController::class, 'marquerLigneRecue'])->name('bons-commande.ligne-recu');
+        // Corrections administrateur — même après « Tout reçu »
+        Route::middleware('admin')->group(function () {
+            Route::put('/bons-commande/{bonCommande}/corriger',  [BonCommandeController::class, 'corriger'])->name('bons-commande.corriger');
+            Route::patch('/bons-commande/{bonCommande}/rouvrir', [BonCommandeController::class, 'rouvrir'])->name('bons-commande.rouvrir');
+            Route::delete('/bons-commande/{bonCommande}',        [BonCommandeController::class, 'supprimer'])->name('bons-commande.supprimer');
+        });
+    });
+
+    // ── Flotte : pièces livrées sans passage au garage (import Excel → BC → BT → facture) ──
+    Route::middleware('perm:creer_factures')->group(function () {
+        Route::get('/flotte/importer',                         [FlotteController::class, 'importerForm'])->name('flotte.importer.form');
+        Route::get('/flotte/modele',                           [FlotteController::class, 'modele'])->name('flotte.modele');
+        Route::post('/flotte/importer/apercu',                 [FlotteController::class, 'apercu'])->name('flotte.importer.apercu');
+        Route::post('/flotte/importer',                        [FlotteController::class, 'importer'])->name('flotte.importer');
+        Route::get('/flotte/livraisons/{livraison}/facturer',  [FlotteController::class, 'facturerForm'])->name('flotte.facturer.form');
+        Route::post('/flotte/livraisons/{livraison}/facturer', [FlotteController::class, 'facturer'])->name('flotte.facturer');
+    });
+    Route::middleware('perm:voir_factures')->group(function () {
+        Route::get('/flotte',          [FlotteController::class, 'index'])->name('flotte.index');
+        Route::get('/flotte/rapport',  [FlotteController::class, 'rapport'])->name('flotte.rapport');
+        Route::get('/flotte/{import}', [FlotteController::class, 'show'])->name('flotte.show')->whereNumber('import');
     });
 
     // ── Garanties ─────────────────────────────────────────────
@@ -296,6 +360,7 @@ Route::middleware('auth')->group(function () {
         Route::patch('/parametres/capacite',                         [ParametreAtelierController::class, 'updateCapacite'])->name('parametres.capacite.update');
         Route::patch('/parametres/tarifs',                           [ParametreAtelierController::class, 'updateTarifs'])->name('parametres.tarifs.update');
         Route::patch('/parametres/controle-qualite',                 [ParametreAtelierController::class, 'updateControleQualiteTechnicien'])->name('parametres.controle-qualite.update');
+        Route::patch('/parametres/main-oeuvre-flotte',               [ParametreAtelierController::class, 'updateMainOeuvreFlotte'])->name('parametres.main-oeuvre-flotte.update');
         Route::post('/parametres/pauses',                            [ParametreAtelierController::class, 'storePause'])->name('parametres.pauses.store');
         Route::patch('/parametres/pauses/{pause}/toggle',            [ParametreAtelierController::class, 'togglePause'])->name('parametres.pauses.toggle');
         Route::delete('/parametres/pauses/{pause}',                  [ParametreAtelierController::class, 'destroyPause'])->name('parametres.pauses.destroy');

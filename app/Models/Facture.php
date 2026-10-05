@@ -22,7 +22,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Facture extends Model
 {
     protected $fillable = [
-        'numero', 'or_id', 'devis_id', 'client_id', 'marque_garantie_id', 'encaissement_global_id',
+        'numero', 'or_id', 'devis_id', 'client_id', 'vehicule_id', 'livraison_flotte_id', 'marque_garantie_id', 'encaissement_global_id',
         'statut', 'mode_paiement',
         'numero_bon_commande_client', 'bon_commande_client_chemin', 'bon_commande_client_nom_original',
         'date_emission', 'date_echeance', 'date_paiement', 'notes', 'frais_timbre',
@@ -44,12 +44,43 @@ class Facture extends Model
         'credit_accorde_at' => 'datetime',
     ];
 
+    // Montants toujours au franc (FDJ)
+    public function setMontantHtAttribute($v): void  { $this->attributes['montant_ht']  = round((float) $v); }
+    public function setMontantTvaAttribute($v): void { $this->attributes['montant_tva'] = round((float) $v); }
+    public function setMontantTtcAttribute($v): void { $this->attributes['montant_ttc'] = round((float) $v); }
+    public function setMontantPayeAttribute($v): void { $this->attributes['montant_paye'] = round((float) $v); }
+
+
     // ── Relations ──────────────────────────────────────────────────────
 
     /** OR auquel cette facture est rattachée */
     public function ordreReparation(): BelongsTo
     {
         return $this->belongsTo(OrdreReparation::class, 'or_id');
+    }
+
+    /** Véhicule facturé directement, sans OR (livraison flotte) — sinon passer par vehiculeConcerne() */
+    public function vehicule(): BelongsTo
+    {
+        return $this->belongsTo(Vehicule::class);
+    }
+
+    /** Livraison flotte facturée (facture sans OR issue d'un import Excel) */
+    public function livraisonFlotte(): BelongsTo
+    {
+        return $this->belongsTo(LivraisonFlotte::class);
+    }
+
+    /** Facture de pièces livrées à une flotte : ni OR, ni réception */
+    public function estFlotte(): bool
+    {
+        return $this->or_id === null && $this->livraison_flotte_id !== null;
+    }
+
+    /** Véhicule concerné, que la facture vienne d'un OR ou d'une livraison flotte */
+    public function vehiculeConcerne(): ?Vehicule
+    {
+        return $this->vehicule ?? $this->ordreReparation?->vehicule;
     }
 
     /** Devis d'origine (si la facture a été créée depuis un devis) */
@@ -84,6 +115,24 @@ class Facture extends Model
         return $this->hasMany(LigneFacture::class);
     }
 
+    /** Avoir qui a annulé cette facture (statut "annulee") */
+    public function avoir(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(Avoir::class, 'facture_id');
+    }
+
+    /** Avoir de correction dont cette facture est la facture de remplacement */
+    public function avoirOrigine(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(Avoir::class, 'facture_remplacement_id');
+    }
+
+    /** Seul l'administrateur peut annuler ou corriger une facture (par avoir) */
+    public function peutEtreAnnuleePar(?User $user): bool
+    {
+        return $user && $user->isAdmin() && $this->statut !== 'annulee';
+    }
+
     /** Encaissement global auquel cette facture peut être rattachée (clients société) */
     public function encaissementGlobal(): \Illuminate\Database\Eloquent\Relations\BelongsTo
     {
@@ -111,7 +160,10 @@ class Facture extends Model
             ->map(fn ($f) => (int) explode('/', $f->numero)[0])
             ->max();
 
-        $seq = ($dernierSeq ?? 0) + 1;
+        // Reprise de la numérotation manuelle d'avant la mise en service (2026 uniquement).
+        $depart = $annee === 2026 ? (int) config('app.facture_numero_depart') : 0;
+
+        $seq = max($dernierSeq ?? 0, $depart) + 1;
 
         return sprintf('%d/GARA/%d', $seq, $annee);
     }
@@ -133,7 +185,14 @@ class Facture extends Model
      */
     public function getMontantRestant(): float
     {
-        return max(0, (float) $this->montant_ttc - (float) $this->montant_paye);
+        // Frais de timbre compris : c'est le total général qui est demandé au client
+        return max(0, $this->totalGeneral() - (float) $this->montant_paye);
+    }
+
+    /** La facture est-elle entièrement réglée (TTC + frais de timbre) ? */
+    public function estSoldee(): bool
+    {
+        return (float) $this->montant_paye >= $this->totalGeneral();
     }
 
     /**

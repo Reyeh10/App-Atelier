@@ -3,7 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Models\BonCommande;
+use App\Models\BonTransfert;
+use Illuminate\Http\Request;
+use App\Models\Activite;
 use App\Services\FournisseurApiService;
+use App\Models\User;
+use Illuminate\Support\Facades\Auth;
 
 /**
  * Suivi des Bons de Commande pièces (BC).
@@ -29,14 +34,19 @@ class BonCommandeController extends Controller
      */
     public function index()
     {
-        if (! auth()->user()->peutVoirBonsCommande()) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->peutVoirBonsCommande()) {
+            abort(403);
+        }
 
         $this->relancerEnvoisEnAttente();
 
         $bons = BonCommande::with([
                 'ordreReparation.client', 'ordreReparation.vehicule',
                 'dossier.client', 'dossier.vehicule',
-                'devis', 'lignes',
+                'devis', 'lignes', 'vehiculeDirect', 'clientDirect',
             ])
             ->latest()
             ->paginate(25);
@@ -74,12 +84,17 @@ class BonCommandeController extends Controller
      */
     public function show(BonCommande $bonCommande)
     {
-        if (! auth()->user()->peutVoirBonsCommande()) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->peutVoirBonsCommande()) {
+            abort(403);
+        }
 
         $bonCommande->load([
             'ordreReparation.client', 'ordreReparation.vehicule',
             'dossier.client', 'dossier.vehicule',
-            'devis', 'lignes',
+            'devis', 'lignes', 'vehiculeDirect', 'clientDirect', 'livraisonFlotte.import',
         ]);
 
         return view('bons-commande.show', compact('bonCommande'));
@@ -91,11 +106,17 @@ class BonCommandeController extends Controller
      */
     public function marquerRecu(BonCommande $bonCommande)
     {
-        if (! auth()->user()->peutGererBonsCommande()) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
 
-        $bonCommande->loadMissing('lignes');
-        if (! $bonCommande->estValideParFournisseur()) {
-            return back()->with('error', "Impossible : le fournisseur (stcd-magasin) n'a pas encore validé la disponibilité de toutes les pièces de {$bonCommande->numero}.");
+        if (! $user || ! $user->peutGererBonsCommande()) {
+            abort(403);
+        }
+
+        // Pièces disponibles chez le magasin ET transférées (BT) — même règle que le bouton
+        $bonCommande->loadMissing(['lignes', 'bonTransfert']);
+        if ($raison = $bonCommande->raisonReceptionImpossible()) {
+            return back()->with('error', "Impossible : {$raison}");
         }
 
         $bonCommande->update(['statut' => 'recu']);
@@ -111,14 +132,19 @@ class BonCommandeController extends Controller
      */
     public function marquerLigneRecue(BonCommande $bonCommande, int $ligneId)
     {
-        if (! auth()->user()->peutGererBonsCommande()) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->peutGererBonsCommande()) {
+            abort(403);
+        }
 
         $ligne = $bonCommande->lignes()->findOrFail($ligneId);
 
-        // On ne peut pas marquer une pièce reçue tant que le fournisseur n'a pas
-        // statué sur sa disponibilité (on peut en revanche toujours décocher).
-        if (! $ligne->recu && is_null($ligne->disponible)) {
-            return back()->with('error', "Impossible : le fournisseur n'a pas encore validé la disponibilité de « {$ligne->designation} ».");
+        // Une pièce n'est reçue que disponible chez le magasin ET transférée (BT) ;
+        // on peut en revanche toujours la décocher
+        if (! $ligne->recu && ($raison = $bonCommande->raisonReceptionImpossible($ligne))) {
+            return back()->with('error', "Impossible : {$raison}");
         }
 
         // Bascule : si la pièce était reçue, elle devient non reçue, et vice-versa
@@ -128,11 +154,210 @@ class BonCommandeController extends Controller
         if ($bonCommande->lignes()->where('recu', false)->doesntExist()) {
             $bonCommande->update(['statut' => 'recu']);
         }
-        // Si une ligne est décochée alors que le BC était fermé, on le réouvre
-        elseif ($bonCommande->statut === 'recu') {
+        // Si une ligne est décochée alors que le BC était fermé, on le réouvre ;
+        // une première pièce reçue fait passer le BC de « En attente » à « Commandé »
+        elseif (in_array($bonCommande->statut, ['recu', 'en_attente'], true) && ($bonCommande->statut === 'recu' || $bonCommande->lignes()->where('recu', true)->exists())) {
             $bonCommande->update(['statut' => 'commande']);
         }
 
         return back()->with('success', 'Statut de la pièce mis à jour.');
+    }
+
+    /**
+     * Correction administrateur des lignes d'un bon de commande — même s'il est
+     * déjà « Tout reçu ». Les changements sont reportés sur la ligne du devis
+     * correspondante (désignation, référence, quantité, prix, disponibilité),
+     * sauf si l'OR est déjà facturé (le devis reste alors figé).
+     */
+    public function corriger(Request $request, BonCommande $bonCommande)
+    {
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->isAdmin()) {
+            abort(403);
+        }
+
+        $request->validate([
+            'lignes'                 => ['required', 'array'],
+            'lignes.*.designation'   => ['required', 'string', 'max:255'],
+            'lignes.*.reference'     => ['nullable', 'string', 'max:100'],
+            'lignes.*.quantite'      => ['required', 'numeric', 'min:0.01'],
+            'lignes.*.disponible'    => ['nullable', 'in:0,1'],
+            'lignes.*.prix_unitaire' => ['nullable', 'numeric', 'min:0'],
+            'lignes.*.note'          => ['nullable', 'string', 'max:255'],
+        ], [
+            'lignes.*.designation.required' => 'La désignation est obligatoire pour chaque pièce.',
+            'lignes.*.quantite.min'         => 'La quantité doit être supérieure à zéro.',
+        ]);
+
+        $bonCommande->load('lignes.ligneDevis.devis.ordreReparation.facture');
+        $devisFige = false;
+
+        foreach ($request->input('lignes') as $id => $valeurs) {
+            $ligne = $bonCommande->lignes->firstWhere('id', (int) $id);
+            if (! $ligne) continue;
+
+            $disponible = ($valeurs['disponible'] ?? '') === '' ? null : (bool) $valeurs['disponible'];
+            $ligne->update([
+                'designation'   => $valeurs['designation'],
+                'reference'     => $valeurs['reference'] ?? null,
+                'quantite'      => $valeurs['quantite'],
+                'disponible'    => $disponible,
+                'prix_unitaire' => ($valeurs['prix_unitaire'] ?? '') === '' ? null : $valeurs['prix_unitaire'],
+                'note'          => $valeurs['note'] ?? null,
+                'recu'          => ! empty($valeurs['recu']),
+            ]);
+
+            $ligneDevis = $ligne->ligneDevis;
+            if (! $ligneDevis) continue;
+            if ($ligneDevis->devis->estFige()) {
+                $devisFige = true;
+                continue;
+            }
+
+            $remise = (float) ($ligneDevis->remise ?? 0);
+            $ligneDevis->update([
+                'designation' => $ligne->designation,
+                'reference'   => $ligne->reference,
+                'quantite'    => $ligne->quantite,
+                'total_ht'    => round((float) $ligne->quantite * (float) $ligneDevis->prix_unitaire * (1 - $remise / 100), 2),
+            ]);
+            // Prix et disponibilité reportés comme pour une réponse du fournisseur (recalcule le devis)
+            $ligne->refresh()->propagerVersDevis();
+        }
+
+        // Statut du BC d'après les lignes : tout reçu → « Reçu », sinon rouvert s'il l'était
+        $bonCommande->load('lignes');
+        if ($bonCommande->lignes->isNotEmpty() && $bonCommande->lignes->every(fn ($l) => $l->recu)) {
+            $bonCommande->update(['statut' => 'recu']);
+        } elseif ($bonCommande->statut === 'recu') {
+            $bonCommande->update(['statut' => 'commande']);
+        }
+
+        Activite::journaliser('corriger_bon_commande', "Correction administrateur du bon de commande {$bonCommande->numero}", $bonCommande);
+
+        return back()->with('success', "BC {$bonCommande->numero} corrigé."
+            . ($devisFige ? ' Le devis n\'a pas été modifié : l\'OR est déjà facturé.' : ' Le devis a été mis à jour.'));
+    }
+
+    /**
+     * Rouvre un bon de commande « Tout reçu » (administrateur) : repasse en
+     * « Commandé » et toutes ses pièces redeviennent « en attente ».
+     */
+    public function rouvrir(BonCommande $bonCommande)
+    {
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->isAdmin()) {
+            abort(403);
+        }
+
+        $bonCommande->update(['statut' => 'commande']);
+        $bonCommande->lignes()->update(['recu' => false]);
+
+        Activite::journaliser('rouvrir_bon_commande', "Réouverture par l'administrateur du bon de commande {$bonCommande->numero}", $bonCommande);
+
+        return back()->with('success', "BC {$bonCommande->numero} rouvert — pièces repassées « en attente ».");
+    }
+
+    /**
+     * Supprime un bon de commande (administrateur). Les lignes du devis restent ;
+     * la feuille de travail concernée n'attend plus ces pièces.
+     */
+    public function supprimer(BonCommande $bonCommande)
+    {
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->isAdmin()) {
+            abort(403);
+        }
+
+        $numero = $bonCommande->numero;
+        $devis  = $bonCommande->devis;
+        $bonCommande->delete();
+
+        Activite::journaliser('supprimer_bon_commande', "Suppression par l'administrateur du bon de commande {$numero}", $devis);
+
+        return $devis
+            ? redirect()->route('devis.show', $devis)->with('success', "BC {$numero} supprimé.")
+            : redirect()->route('bons-commande.index')->with('success', "BC {$numero} supprimé.");
+    }
+
+    /**
+     * Joint à la main le bon de transfert du magasin (numéro + scan ou photo
+     * du BT papier) — quand il n'est pas arrivé automatiquement. Un seul BT
+     * par bon de commande : il remplace le précédent.
+     */
+    public function enregistrerBonTransfert(Request $request, BonCommande $bonCommande)
+    {
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->peutGererBonsCommande()) {
+            abort(403);
+        }
+
+        $existant = $bonCommande->bonTransfert;
+        // Fichier obligatoire s'il n'y en a pas encore, ou si c'est un autre BT (autre numéro)
+        $fichierRequis = ! $existant?->fichier_chemin || trim((string) $request->input('numero')) !== $existant->numero;
+
+        $data = $request->validate([
+            'numero'         => ['required', 'string', 'max:50'],
+            'date_transfert' => ['nullable', 'date'],
+            'fichier'        => [$fichierRequis ? 'required' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:10240'],
+            'notes'          => ['nullable', 'string', 'max:1000'],
+        ], [
+            'numero.required'  => 'Indiquez le numéro du bon de transfert.',
+            'fichier.required' => 'Joignez le scan ou la photo du bon de transfert (obligatoire pour un nouveau BT).',
+            'fichier.mimes'    => 'Le fichier doit être un PDF, JPG ou PNG.',
+            'fichier.max'      => 'Le fichier ne doit pas dépasser 10 Mo.',
+        ]);
+
+        $existant?->oublierFichierSiAutreNumero($data['numero']);
+
+        $bt = BonTransfert::updateOrCreate(
+            ['bon_commande_id' => $bonCommande->id],
+            [
+                'numero'         => $data['numero'],
+                'date_transfert' => $data['date_transfert'] ?? now()->toDateString(),
+                'notes'          => $data['notes'] ?? null,
+                'source'         => $existant?->source === 'magasin' ? 'magasin' : 'manuel',
+                'saisi_par'      => $user->id,
+            ]
+        );
+        $bt->remplacerFichier($request->file('fichier'));
+
+        Activite::journaliser('bon_transfert_saisi', "Bon de transfert {$bt->numero} joint au {$bonCommande->numero}", $bonCommande);
+
+        return back()->with('success', "Bon de transfert {$bt->numero} enregistré.");
+    }
+
+    /**
+     * Ouvre le bon de transfert : le fichier joint s'il y en a un, sinon une
+     * page imprimable construite à partir des données reçues du magasin.
+     */
+    public function voirBonTransfert(BonCommande $bonCommande)
+    {
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->peutVoirBonsCommande()) {
+            abort(403);
+        }
+
+        $bt = $bonCommande->bonTransfert;
+        if (! $bt) {
+            abort(404);
+        }
+        if ($bt->fichier_url) {
+            return redirect($bt->fichier_url);
+        }
+
+        $bonCommande->load(['ordreReparation.vehicule', 'ordreReparation.client', 'dossier.vehicule', 'dossier.client', 'lignes']);
+
+        return view('bons-commande.bon-transfert', ['bc' => $bonCommande, 'bt' => $bt]);
     }
 }

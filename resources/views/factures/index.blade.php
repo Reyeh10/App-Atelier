@@ -4,6 +4,10 @@
 @section('page-subtitle', 'Suivi des encaissements')
 
 @section('header-actions')
+<a href="{{ route('avoirs.index') }}"
+   class="flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 border border-gray-300 rounded-lg px-3 py-2 transition-colors">
+    ↩ Avoirs
+</a>
 <a href="{{ route('factures.bons-commande-clients') }}"
    class="flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 border border-gray-300 rounded-lg px-3 py-2 transition-colors">
     📋 Bons de commande clients
@@ -47,15 +51,24 @@
 <form method="GET" action="{{ route('factures.index') }}" class="bg-white rounded-2xl border border-gray-200 p-4">
     <div class="flex flex-wrap gap-3 items-end">
 
+        {{-- Recherche --}}
+        <div class="flex-1 min-w-0 max-w-sm">
+            <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Recherche</label>
+            <input type="text" name="recherche" value="{{ request('recherche') }}" placeholder="N° facture, client, téléphone, OR, immatriculation..."
+                   class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
+        </div>
+
+        <div class="w-px h-8 bg-gray-200 self-center"></div>
+
         {{-- Statut --}}
         <div>
             <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Statut</label>
             <div class="flex gap-1.5">
-                @foreach(['' => 'Toutes', 'emise' => 'Non payées', 'payee' => 'Payées'] as $val => $label)
+                @foreach(['' => 'Toutes', 'emise' => 'Non payées', 'payee' => 'Payées', 'annulee' => 'Annulées'] as $val => $label)
                 <a href="{{ route('factures.index', array_merge(request()->except('statut','page'), $val ? ['statut' => $val] : [])) }}"
                    class="px-3 py-1.5 rounded-lg text-xs font-bold border-2 transition-all
                           {{ request('statut', '') === $val
-                             ? ($val === 'payee' ? 'border-green-500 bg-green-50 text-green-700' : ($val === 'emise' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-orange-500 bg-orange-50 text-orange-700'))
+                             ? ($val === 'payee' ? 'border-green-500 bg-green-50 text-green-700' : ($val === 'emise' ? 'border-blue-500 bg-blue-50 text-blue-700' : ($val === 'annulee' ? 'border-red-400 bg-red-50 text-red-700' : 'border-orange-500 bg-orange-50 text-orange-700')))
                              : 'border-gray-200 text-slate-600 hover:border-gray-300' }}">
                     {{ $label }}
                 </a>
@@ -99,14 +112,16 @@
             <input type="date" name="date_ref" value="{{ request('date_ref', now()->format('Y-m-d')) }}"
                    class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
             @endif
-            <input type="hidden" name="statut" value="{{ request('statut') }}">
         </div>
         <button type="submit" class="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-1.5 rounded-lg transition-colors self-end">
             Filtrer
         </button>
         @endif
 
-        @if(request()->hasAny(['statut', 'periode', 'date_ref']))
+        {{-- Le statut choisi est gardé quand on lance une recherche ou une période --}}
+        <input type="hidden" name="statut" value="{{ request('statut') }}">
+
+        @if(request()->anyFilled(['statut', 'periode', 'date_ref', 'recherche']))
         <a href="{{ route('factures.index') }}" class="text-xs text-slate-400 hover:text-slate-600 self-end pb-1.5">
             ✕ Effacer
         </a>
@@ -134,7 +149,7 @@
             </thead>
             <tbody class="divide-y divide-gray-100">
                 @forelse($factures as $facture)
-                <tr class="hover:bg-gray-50 {{ $facture->statut === 'payee' ? 'opacity-70' : '' }}">
+                <tr class="hover:bg-gray-50 {{ in_array($facture->statut, ['payee', 'annulee']) ? 'opacity-70' : '' }}">
                     <td class="px-5 py-3 font-mono font-semibold text-slate-800">{{ $facture->numero }}</td>
                     <td class="px-5 py-3 text-slate-700 font-medium">
                         {{ $facture->payeur_nom }}
@@ -143,10 +158,15 @@
                         @endif
                     </td>
                     <td class="px-5 py-3">
+                        @if($facture->ordreReparation)
                         <a href="{{ route('ordres-reparations.show', $facture->ordreReparation) }}"
                            class="font-mono text-orange-500 hover:underline text-xs">
                             {{ $facture->ordreReparation->numero }}
                         </a>
+                        @else
+                        <span class="text-xs bg-indigo-100 text-indigo-700 font-semibold px-1.5 py-0.5 rounded">Flotte</span>
+                        <span class="font-mono text-xs text-slate-600">{{ $facture->vehicule?->immatriculation }}</span>
+                        @endif
                     </td>
                     <td class="px-5 py-3 text-slate-500">{{ $facture->date_emission->format('d/m/Y') }}</td>
                     <td class="px-5 py-3 text-slate-500 text-xs">{{ $facture->getModePaiementLabel() }}</td>
@@ -155,6 +175,7 @@
                         <span class="px-2 py-0.5 rounded-full text-xs font-bold
                             @if($facture->statut === 'payee') bg-green-100 text-green-700
                             @elseif($facture->statut === 'emise') bg-blue-100 text-blue-700
+                            @elseif($facture->statut === 'annulee') bg-red-100 text-red-700
                             @else bg-gray-100 text-gray-600 @endif">
                             {{ $facture->getStatutLabel() }}
                         </span>

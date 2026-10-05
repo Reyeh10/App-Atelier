@@ -5,7 +5,7 @@
 
 @section('header-actions')
 <div class="flex gap-2">
-    @if(in_array($devis->statut, ['brouillon','envoye']) && auth()->user()->hasPermission('gerer_devis'))
+    @if($devis->estModifiablePar(auth()->user()))
     <a href="{{ route('devis.edit', $devis) }}"
        class="flex items-center gap-2 text-sm bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg px-3 py-2 transition-colors">
         ✏️ Modifier
@@ -43,10 +43,20 @@
        class="flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 border border-gray-300 rounded-lg px-3 py-2 transition-colors">
         ← OR {{ $devis->parent->numero }}
     </a>
-    @else
+    @elseif($devis->dossier_id)
     <a href="{{ route('dossiers-reception.show', $devis->dossier_id) }}"
        class="flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 border border-gray-300 rounded-lg px-3 py-2 transition-colors">
         ← Dossier {{ $devis->parent->numero }}
+    </a>
+    @elseif($devis->reservation_id)
+    <a href="{{ route('reservations.show', $devis->reservation_id) }}"
+       class="flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 border border-gray-300 rounded-lg px-3 py-2 transition-colors">
+        ← Réservation {{ $devis->parent->numero }}
+    </a>
+    @else
+    <a href="{{ route('devis.index') }}"
+       class="flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 border border-gray-300 rounded-lg px-3 py-2 transition-colors">
+        ← Devis
     </a>
     @endif
 </div>
@@ -64,6 +74,34 @@
 @endif
 
 @php $attendFournisseur = $devis->attendReponseFournisseur(); @endphp
+
+{{-- Devis établi à l'avance (réservation ou devis libre) --}}
+@if($devis->reservation_id || $devis->client_id)
+<div class="bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3 text-sm text-indigo-700">
+    <p class="font-semibold">
+        {{ $devis->reservation_id ? 'Devis en avance pour la réservation ' . ($devis->reservation?->numero ?? '') : 'Devis libre — établi sans réception' }}
+        @if($devis->date_prevue) · venue prévue le {{ $devis->date_prevue->format('d/m/Y') }}@endif
+    </p>
+    @if($devis->kilometrage_prevu || $devis->entretien_km_seuil)
+    <p class="text-xs mt-0.5">
+        @if($devis->kilometrage_prevu)Kilométrage prévu : {{ number_format($devis->kilometrage_prevu, 0, ',', ' ') }} km @endif
+        @if($devis->entretien_km_seuil)· Palier d'entretien retenu : {{ number_format($devis->entretien_km_seuil, 0, ',', ' ') }} km @endif
+    </p>
+    @endif
+    @if($devis->estEnAvance())
+    <p class="text-xs mt-0.5">Il ne peut pas être accepté à l'avance : le jour de la réception, le dossier le reprend, il reste modifiable, puis il est accepté.{{ $devis->reservation_id ? '' : ' Si le client revient avec une réservation, faites plutôt le devis depuis celle-ci.' }}</p>
+    @endif
+</div>
+
+{{-- Palier réel différent de celui prévu (constaté à la réception) --}}
+@if($devis->entretien_km_seuil && $devis->dossier?->entretien_km_seuil && (int) $devis->dossier->entretien_km_seuil !== (int) $devis->entretien_km_seuil)
+<div class="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700">
+    ⚠ Ce devis a été établi pour le palier {{ number_format($devis->entretien_km_seuil, 0, ',', ' ') }} km, mais le kilométrage relevé à la réception
+    ({{ number_format($devis->dossier->kilometrage_entree ?? 0, 0, ',', ' ') }} km) correspond au palier {{ number_format($devis->dossier->entretien_km_seuil, 0, ',', ' ') }} km.
+    Le prix annoncé au client est conservé — ajustez le devis si besoin.
+</div>
+@endif
+@endif
 
 {{-- Statut + workflow --}}
 <div class="bg-white rounded-2xl border-2 border-{{ $devis->getStatutColor() }}-300 p-6">
@@ -91,7 +129,19 @@
             </form>
             @endif
             @endif
-            @if(in_array($devis->statut, ['brouillon','envoye']))
+            @if(in_array($devis->statut, ['brouillon','envoye']) && $devis->estEnAvance())
+            <button type="button" disabled title="Un devis en avance est accepté le jour de la réception"
+                    class="bg-gray-200 text-gray-400 text-sm font-bold px-4 py-2 rounded-xl cursor-not-allowed">
+                ✓ Accepté le jour de la réception
+            </button>
+            <form method="POST" action="{{ route('devis.refuser', $devis) }}">
+                @csrf @method('PATCH')
+                <button type="submit" class="bg-red-500 hover:bg-red-600 text-white text-sm font-bold px-4 py-2 rounded-xl transition-colors"
+                        onclick="return confirm('Confirmer le refus du devis ?')">
+                    ✗ Refusé
+                </button>
+            </form>
+            @elseif(in_array($devis->statut, ['brouillon','envoye']))
             @if($attendFournisseur)
             <button type="button" disabled title="En attente de la confirmation du fournisseur pour toutes les pièces"
                     class="bg-gray-200 text-gray-400 text-sm font-bold px-4 py-2 rounded-xl cursor-not-allowed">
@@ -134,7 +184,7 @@
     @endif
 
     {{-- Upload devis signé — mêmes droits que la validation (gerer_devis ou valider_devis) --}}
-    @if(in_array($devis->statut, ['envoye','brouillon']) && auth()->user()->peutValiderDevis() && ! $attendFournisseur)
+    @if(in_array($devis->statut, ['envoye','brouillon']) && auth()->user()->peutValiderDevis() && ! $attendFournisseur && ! $devis->estEnAvance())
     <div class="mt-4 border-t border-gray-100 pt-4">
         <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Uploader le devis signé par le client</p>
         <form method="POST" action="{{ route('devis.upload-signature', $devis) }}" enctype="multipart/form-data" class="flex gap-3 items-center">
@@ -146,6 +196,31 @@
             </button>
         </form>
         <p class="text-xs text-slate-400 mt-1">PDF, JPG ou PNG — max 5 Mo — cela marquera le devis comme accepté automatiquement</p>
+    </div>
+    @endif
+
+    {{-- Correction administrateur : changer la décision (accepté ↔ refusé) --}}
+    @if(auth()->user()->isAdmin() && in_array($devis->statut, ['accepte', 'refuse'], true))
+    @php
+        $nouvelleDecision = $devis->statut === 'accepte' ? 'refuse' : 'accepte';
+        $raisonDecision   = $devis->raisonChangementDecisionImpossible($nouvelleDecision);
+    @endphp
+    <div class="mt-4 border-t border-gray-100 pt-4">
+        <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Correction administrateur — changer la décision</p>
+        @if($raisonDecision)
+        <p class="text-xs text-slate-400">{{ $raisonDecision }}</p>
+        @else
+        <form method="POST" action="{{ route('devis.changer-decision', $devis) }}" class="flex gap-3 items-center flex-wrap"
+              onsubmit="return confirm('{{ $nouvelleDecision === 'refuse' ? 'Passer ce devis à « Refusé » ? Son bon de commande sera annulé.' : 'Passer ce devis à « Accepté » ? Son bon de commande sera renvoyé au magasin.' }}')">
+            @csrf @method('PATCH')
+            <input type="hidden" name="decision" value="{{ $nouvelleDecision }}">
+            <input type="text" name="motif" required maxlength="255" placeholder="Motif (ex : le client a changé d'avis)"
+                   class="flex-1 px-3 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
+            <button type="submit" class="{{ $nouvelleDecision === 'refuse' ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600' }} text-white font-bold text-sm px-5 py-2 rounded-xl transition-colors flex-shrink-0">
+                {{ $nouvelleDecision === 'refuse' ? '✗ Passer à « Refusé »' : '✓ Passer à « Accepté »' }}
+            </button>
+        </form>
+        @endif
     </div>
     @endif
 
@@ -199,7 +274,7 @@
                         {{ $ligne->reference ?: '—' }}
                     </td>
                     <td class="px-5 py-3 text-right text-slate-600">
-                        {{ $ligne->type === 'main_oeuvre' ? rtrim(rtrim(number_format($ligne->quantite, 2, ',', ''), '0'), ',') : number_format($ligne->quantite, 0, ',', ' ') }}
+                        {{ $ligne->type === 'main_oeuvre' ? rtrim(rtrim(number_format($ligne->quantite, 2, ',', ''), '0'), ',') : rtrim(rtrim(number_format($ligne->quantite, 2, ',', ' '), '0'), ',') }}
                         @if($ligne->type === 'main_oeuvre')
                             <span class="text-xs text-blue-500">h</span>
                         @endif

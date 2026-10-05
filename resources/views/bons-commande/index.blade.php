@@ -51,11 +51,15 @@
                 </td>
                 <td class="px-6 py-4 text-sm text-slate-600">{{ $bc->client?->nom_complet ?? '—' }}</td>
                 <td class="px-6 py-4">
+                    @if($bc->devis)
                     <span class="font-mono text-xs text-slate-500">{{ $bc->devis->numero }}</span>
+                    @else
+                    <span class="text-xs bg-indigo-100 text-indigo-700 font-semibold px-1.5 py-0.5 rounded">Flotte</span>
+                    @endif
                 </td>
                 <td class="px-6 py-4">
                     <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium
-                        {{ $bc->statut === 'recu' ? 'bg-green-100 text-green-700' : ($bc->statut === 'commande' ? 'bg-blue-100 text-blue-700' : 'bg-yellow-100 text-yellow-700') }}">
+                        {{ $bc->statut === 'recu' ? 'bg-green-100 text-green-700' : ($bc->statut === 'commande' ? 'bg-blue-100 text-blue-700' : ($bc->statut === 'annule' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700')) }}">
                         {{ $bc->getStatutLabel() }}
                     </span>
                 </td>

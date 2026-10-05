@@ -40,3 +40,9 @@ Route::middleware('fournisseur.token')->patch(
     '/bons-commande/{numero}/lignes/{index}',
     [FournisseurReponseController::class, 'updateLigne']
 )->name('api.bons-commande.lignes.update');
+
+// Bon de transfert créé par le magasin pour ce bon de commande (un seul par BC)
+Route::middleware('fournisseur.token')->post(
+    '/bons-commande/{numero}/bon-transfert',
+    [FournisseurReponseController::class, 'enregistrerBonTransfert']
+)->name('api.bons-commande.bon-transfert');

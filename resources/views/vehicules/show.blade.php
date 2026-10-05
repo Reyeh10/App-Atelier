@@ -149,14 +149,20 @@
             </div>
 
             @if($vehicule->ordresReparations->isNotEmpty())
-            {{-- Barre de recherche OR --}}
-            <div class="relative mb-3">
+            {{-- Barre de recherche OR + filtre par date d'entrée --}}
+            <div class="flex gap-2 mb-3">
+            <div class="relative flex-1">
                 <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/>
                 </svg>
                 <input id="or-search" type="text" placeholder="Rechercher par numéro OR ou motif…"
                        class="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-300 focus:border-orange-400 bg-gray-50"
-                       oninput="filtrerOR(this.value)">
+                       oninput="filtrerOR()">
+            </div>
+            <input id="or-date" type="date" title="Date d'entrée à l'atelier" onchange="filtrerOR()"
+                   class="w-44 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-300 focus:border-orange-400 bg-gray-50">
+            <button type="button" id="or-date-effacer" onclick="document.getElementById('or-date').value=''; filtrerOR()"
+                    class="hidden text-xs text-slate-400 hover:text-slate-600 px-1">✕</button>
             </div>
             @endif
 
@@ -170,12 +176,14 @@
                 <p class="text-slate-500 text-sm">Aucune intervention pour ce véhicule.</p>
             </div>
             @else
-            <div id="or-list" class="space-y-2">
+            {{-- Liste avec son propre défilement quand l'historique devient long --}}
+            <div id="or-list" class="space-y-2 overflow-y-auto" style="max-height: 440px; padding-right: 4px;">
                 @foreach($vehicule->ordresReparations as $or)
                 <a href="{{ route('ordres-reparations.show', $or) }}"
                    class="or-item flex items-center gap-4 p-4 rounded-xl border border-gray-100 hover:border-orange-200 hover:bg-orange-50 transition-colors"
                    data-numero="{{ strtolower($or->numero) }}"
-                   data-motif="{{ strtolower($or->motif_entree) }}">
+                   data-motif="{{ strtolower($or->motif_entree) }}"
+                   data-date="{{ $or->date_entree->format('Y-m-d') }}">
                     <div class="w-2 h-2 rounded-full bg-{{ $or->getStatutColor() }}-500 flex-shrink-0"></div>
                     <div class="flex-1">
                         <div class="flex items-center gap-2 mb-0.5">
@@ -199,13 +207,22 @@
                 </a>
                 @endforeach
 
-                <p id="or-empty-msg" class="hidden text-center text-sm text-slate-400 py-6">Aucun OR ne correspond à cette recherche.</p>
+                <p id="or-empty-msg" class="hidden text-center text-sm text-slate-400 py-6">Aucun OR ne correspond à cette recherche ou à cette date.</p>
             </div>
             @endif
         </div>
     </div>
 
 </div>
+
+@if(auth()->user()->hasPermission('voir_factures'))
+{{-- ══ Pièces et main-d'œuvre facturées ═══════════════════════════ --}}
+@include('partials.lignes-facturees', [
+    'urlFiltre'   => route('vehicules.show', $vehicule),
+    'sousTitre'   => 'Lignes des factures de ce véhicule (les factures annulées par avoir ne sont pas comptées).',
+    'messageVide' => "Aucune pièce ni main-d'œuvre facturée pour ce véhicule.",
+])
+@endif
 
 @if(auth()->user()->hasPermission('gerer_vehicules'))
 {{-- ══ MODAL : Changer de propriétaire ═══════════════════════════ --}}
@@ -259,12 +276,15 @@
 function ouvrirModalTransfert() { document.getElementById('modal_transfert')?.classList.remove('hidden'); }
 function fermerModalTransfert() { document.getElementById('modal_transfert')?.classList.add('hidden'); }
 
-function filtrerOR(q) {
-    q = q.toLowerCase().trim();
+function filtrerOR() {
+    const q    = (document.getElementById('or-search')?.value || '').toLowerCase().trim();
+    const date = document.getElementById('or-date')?.value || '';
+    document.getElementById('or-date-effacer')?.classList.toggle('hidden', !date);
     const items = document.querySelectorAll('.or-item');
     let visible = 0;
     items.forEach(function(el) {
-        const match = !q || el.dataset.numero.includes(q) || el.dataset.motif.includes(q);
+        const match = (!q || el.dataset.numero.includes(q) || el.dataset.motif.includes(q))
+            && (!date || el.dataset.date === date);
         el.style.display = match ? '' : 'none';
         if (match) visible++;
     });

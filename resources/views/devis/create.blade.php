@@ -106,7 +106,7 @@
                         </div>
                     </td>
                     <td class="px-3 py-3">
-                        <input type="number" name="lignes[0][prix_unitaire]" value="0" min="0" step="0.01"
+                        <input type="number" name="lignes[0][prix_unitaire]" value="0" min="0" step="1"
                                class="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-right focus:outline-none focus:ring-1 focus:ring-orange-500 ligne-pu" oninput="calculerLigne(this)">
                     </td>
                     <td class="px-3 py-3">
@@ -114,7 +114,7 @@
                                class="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-right focus:outline-none focus:ring-1 focus:ring-orange-500 ligne-remise" oninput="calculerLigne(this)">
                     </td>
                     <td class="px-3 py-3 text-right">
-                        <span class="font-semibold text-slate-800 ligne-total text-xs">0,00</span>
+                        <span class="font-semibold text-slate-800 ligne-total text-xs">0</span>
                         <input type="hidden" name="lignes[0][total_ht]" class="ligne-total-input" value="0">
                     </td>
                     <td class="px-3 py-3 text-center">
@@ -131,11 +131,11 @@
     <div class="border-t border-gray-200 px-6 py-4 bg-gray-50">
         <div class="flex justify-end">
             <div class="space-y-2 min-w-64">
-                <div class="flex justify-between text-sm"><span class="text-slate-500">Total HT</span><span class="font-semibold" id="total-ht">0,00 FDJ</span></div>
-                <div class="flex justify-between text-sm"><span class="text-slate-500">TVA (10%)</span><span class="font-semibold" id="total-tva">0,00 FDJ</span></div>
+                <div class="flex justify-between text-sm"><span class="text-slate-500">Total HT</span><span class="font-semibold" id="total-ht">0 FDJ</span></div>
+                <div class="flex justify-between text-sm"><span class="text-slate-500">TVA (10%)</span><span class="font-semibold" id="total-tva">0 FDJ</span></div>
                 <div class="flex justify-between text-base font-bold border-t border-gray-300 pt-2">
                     <span class="text-slate-800">Total TTC</span>
-                    <span class="text-orange-500" id="total-ttc">0,00 FDJ</span>
+                    <span class="text-orange-500" id="total-ttc">0 FDJ</span>
                 </div>
             </div>
         </div>
@@ -281,7 +281,7 @@ function ajouterLigne(type) {
             </div>
         </td>
         <td class="px-3 py-3">
-            <input type="number" name="lignes[${i}][prix_unitaire]" value="0" min="0" step="0.01"
+            <input type="number" name="lignes[${i}][prix_unitaire]" value="0" min="0" step="1"
                    ${isPiece ? 'readonly title="Prix fourni automatiquement par le magasin"' : ''}
                    class="w-full border rounded-lg px-2 py-1.5 text-xs text-right ligne-pu ${isPiece ? 'border-gray-100 bg-gray-50 text-slate-400 cursor-not-allowed' : 'border-gray-300 focus:outline-none focus:ring-1 focus:ring-orange-500'}"
                    oninput="calculerLigne(this)">
@@ -292,7 +292,7 @@ function ajouterLigne(type) {
                    oninput="calculerLigne(this)">
         </td>
         <td class="px-3 py-3 text-right">
-            <span class="font-semibold text-slate-800 ligne-total text-xs">0,00</span>
+            <span class="font-semibold text-slate-800 ligne-total text-xs">0</span>
             <input type="hidden" name="lignes[${i}][total_ht]" class="ligne-total-input" value="0">
         </td>
         <td class="px-3 py-3 text-center">
@@ -356,7 +356,7 @@ function calculerLigne(input) {
     const remise = parseFloat(row.querySelector('.ligne-remise').value) || 0;
     const total  = qty * pu * (1 - remise / 100);
     row.querySelector('.ligne-total').textContent       = formatFDJ(total);
-    row.querySelector('.ligne-total-input').value       = total.toFixed(2);
+    row.querySelector('.ligne-total-input').value       = Math.round(total);
     recalculerTotaux();
 }
 
@@ -364,14 +364,14 @@ function recalculerTotaux() {
     let ht = 0;
     document.querySelectorAll('.ligne-total-input').forEach(i => { ht += parseFloat(i.value) || 0; });
     // Taux fixe imposé par la direction — non modifiable par le formulaire.
-    const tva = ht * 0.10;
+    const tva = Math.round(ht * 0.10);
     document.getElementById('total-ht').textContent  = formatFDJ(ht) + ' FDJ';
     document.getElementById('total-tva').textContent = formatFDJ(tva) + ' FDJ';
     document.getElementById('total-ttc').textContent = formatFDJ(ht + tva) + ' FDJ';
 }
 
 function formatFDJ(n) {
-    return n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ' ').replace('.', ',');
+    return Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 }
 
 recalculerTotaux();

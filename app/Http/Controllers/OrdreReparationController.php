@@ -5,7 +5,6 @@ namespace App\Http\Controllers;
 use App\Models\Activite;
 use App\Models\Client;
 use App\Models\Devis;
-use App\Models\EntretienTache;
 use App\Models\LigneDevis;
 use App\Models\NotificationInterne;
 use App\Models\OrdreReparation;
@@ -128,7 +127,8 @@ class OrdreReparationController extends Controller
             'client_id'              => ['required', 'exists:clients,id'],
             'vehicule_id'            => ['required', 'exists:vehicules,id'],
             'type'                   => ['required', 'in:normal,garantie,sinistre,entretien'],
-            'type_moteur_id'         => ['nullable', 'exists:types_moteur,id'],
+            // OR d'entretien : sans type de moteur, aucun palier → devis et feuille de travail vides
+            'type_moteur_id'         => ['nullable', 'required_if:type,entretien', 'exists:types_moteur,id'],
             'kilometrage_entree'     => ['required', 'integer', 'min:0'],
             'niveau_carburant'       => ['required', 'in:vide,1/4,1/2,3/4,plein'],
             'proprete_interne'       => ['nullable', 'in:bon,acceptable,mauvais'],
@@ -148,6 +148,7 @@ class OrdreReparationController extends Controller
             'photos_vehicule'        => ['required', 'array', 'min:1', 'max:10'],
             'photos_vehicule.*'      => ['file', 'mimes:jpg,jpeg,png,webp', 'max:8192'],
         ], [
+            'type_moteur_id.required_if'     => "Choisissez le type de moteur : c'est lui qui donne les pièces et les contrôles du barème d'entretien.",
             'client_id.required'          => 'Veuillez sélectionner un client.',
             'client_id.exists'            => 'Le client sélectionné est introuvable.',
             'vehicule_id.required'        => 'Veuillez sélectionner un véhicule.',
@@ -257,7 +258,7 @@ class OrdreReparationController extends Controller
      */
     public function show(OrdreReparation $ordresReparation)
     {
-        $ordresReparation->load(['client', 'vehicule.typeMoteur', 'conseiller', 'technicien', 'chef', 'controleQualitePar', 'photos', 'photosOr', 'devis', 'allDevis.lignes', 'facture', 'dossier.reservation']);
+        $ordresReparation->load(['client', 'vehicule.typeMoteur', 'conseiller', 'technicien', 'chef', 'controleQualitePar', 'photos', 'photosOr', 'devis', 'allDevis.lignes', 'allDevis.bonCommande.bonTransfert', 'allDevis.technicien', 'facture', 'dossier.reservation', 'bonsCommande.bonTransfert', 'factures.avoir']);
         return view('ordres-reparations.show', ['or' => $ordresReparation]);
     }
 
@@ -401,6 +402,12 @@ class OrdreReparationController extends Controller
             abort(403);
         }
 
+        // Même règle que le bouton « Démarrer les travaux »
+        $ordresReparation->load('allDevis.bonCommande');
+        if (! $ordresReparation->peutDemarrerTravaux()) {
+            return back()->with('error', $ordresReparation->raisonEtapeRefusee('démarrer les travaux'));
+        }
+
         $ordresReparation->update([
             'heure_debut_travaux' => now(),
             'statut'              => 'en_cours',
@@ -427,6 +434,11 @@ class OrdreReparationController extends Controller
             abort(403);
         }
 
+        // Même règle que le bouton « Terminer les travaux »
+        if (! $ordresReparation->peutTerminerTravaux()) {
+            return back()->with('error', $ordresReparation->raisonEtapeRefusee('terminer les travaux'));
+        }
+
         $request->validate([
             'duree_estimee' => ['nullable', 'numeric', 'min:0.5'],
         ], [
@@ -434,18 +446,329 @@ class OrdreReparationController extends Controller
             'duree_estimee.min'     => 'La durée estimée doit être d\'au moins 0,5 heure.',
         ]);
 
-        $ordresReparation->update([
-            'heure_fin_travaux' => now(),
-            'statut'            => $ordresReparation->service_gratuit ? 'pret' : 'controle_qualite',
-        ]);
+        $ordresReparation->update(['heure_fin_travaux' => now()]);
         if ($request->filled('duree_estimee')) {
             $ordresReparation->update(['duree_estimee' => (float) $request->duree_estimee]);
         }
         Activite::journaliser('terminer_travaux', "Fin des travaux sur {$ordresReparation->numero}", $ordresReparation);
 
+        // Le véhicule ne passe à l'étape suivante que quand toutes les feuilles
+        // (feuille 1 + devis complémentaires) sont terminées.
+        $ordresReparation->load('allDevis');
+        if (! $ordresReparation->feuillesComplementairesTerminees()) {
+            return back()->with('success', 'Feuille 1 terminée — le véhicule reste en cours tant que les feuilles des devis complémentaires ne sont pas terminées.');
+        }
+        $ordresReparation->update(['statut' => $ordresReparation->service_gratuit ? 'pret' : 'controle_qualite']);
+
         return $ordresReparation->service_gratuit
             ? back()->with('success', 'Travaux terminés — service gratuit, véhicule prêt (pas de facturation, pas de contrôle qualité/lavage).')
             : back()->with('success', 'Travaux terminés — passage en contrôle qualité.');
+    }
+
+    /**
+     * Formulaire de correction d'un OR — administrateur uniquement. Rattrape une
+     * erreur de saisie de la réception (kilométrage, type de moteur oublié…)
+     * sans avoir à tout refaire.
+     */
+    public function corriger(OrdreReparation $ordresReparation)
+    {
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->isAdmin()) {
+            abort(403);
+        }
+
+        $ordresReparation->load(['client', 'vehicule.typeMoteur', 'allDevis.lignes', 'facture']);
+
+        return view('ordres-reparations.corriger', [
+            'or'          => $ordresReparation,
+            'typesMoteur' => TypeMoteur::orderBy('modele')->get(),
+            'paliers'     => $ordresReparation->vehicule->type_moteur_id
+                ? EntretienService::paliers($ordresReparation->vehicule->type_moteur_id)->pluck('km_seuil')
+                : collect(),
+        ]);
+    }
+
+    /**
+     * Enregistre la correction d'un OR (administrateur). Pour un entretien, le
+     * palier est recalculé (kilométrage OU délai à la date d'entrée), et les
+     * pièces du nouveau palier peuvent être ajoutées au devis principal.
+     */
+    public function enregistrerCorrection(Request $request, OrdreReparation $ordresReparation)
+    {
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->isAdmin()) {
+            abort(403);
+        }
+
+        // Un OR passé par le circuit garantie garde son type (géré par l'équipe garantie)
+        $garantie = $ordresReparation->type === 'garantie' || $ordresReparation->statut_garantie !== null;
+
+        $data = $request->validate([
+            'type'                  => [$garantie ? 'nullable' : 'required', 'in:normal,sinistre,entretien'],
+            'kilometrage_entree'    => ['required', 'integer', 'min:0'],
+            'niveau_carburant'      => ['required', 'in:vide,1/4,1/2,3/4,plein'],
+            'date_entree'           => ['required', 'date'],
+            'heure_entree'          => ['nullable', 'date_format:H:i'],
+            'date_sortie_prevue'    => ['nullable', 'date', 'after_or_equal:date_entree'],
+            'urgence'               => ['required', 'in:normal,urgent,tres_urgent'],
+            'motif_entree'          => ['nullable', 'string'],
+            'notes_internes'        => ['nullable', 'string'],
+            'type_moteur_id'        => ['nullable', 'exists:types_moteur,id'],
+            'palier_manuel'         => ['nullable', 'integer', 'min:0'],
+            'ajouter_pieces_palier' => ['nullable', 'boolean'],
+        ], [
+            'kilometrage_entree.required'      => 'Le kilométrage d\'entrée est obligatoire.',
+            'date_sortie_prevue.after_or_equal' => 'La date de sortie prévue ne peut pas précéder la date d\'entrée.',
+        ]);
+
+        $vehicule = $ordresReparation->vehicule;
+        if ($request->filled('type_moteur_id') && (int) $request->type_moteur_id !== (int) $vehicule->type_moteur_id) {
+            $vehicule->update(['type_moteur_id' => (int) $request->type_moteur_id]);
+        }
+
+        $type         = $garantie ? $ordresReparation->type : $data['type'];
+        $ancienPalier = $ordresReparation->entretien_km_seuil;
+        $palier       = null;
+        if ($type === 'entretien' && $vehicule->type_moteur_id) {
+            $palier = $request->filled('palier_manuel')
+                ? (int) $request->palier_manuel
+                : EntretienService::resoudrePalier($vehicule, (int) $data['kilometrage_entree'], (int) $vehicule->type_moteur_id, \Carbon\Carbon::parse($data['date_entree']), $ordresReparation->id);
+        }
+
+        $ordresReparation->update([
+            'type'               => $type,
+            'kilometrage_entree' => $data['kilometrage_entree'],
+            'niveau_carburant'   => $data['niveau_carburant'],
+            'date_entree'        => $data['date_entree'],
+            'heure_entree'       => $data['heure_entree'] ?? null,
+            'date_sortie_prevue' => $data['date_sortie_prevue'] ?? null,
+            'urgence'            => $data['urgence'],
+            'motif_entree'       => $data['motif_entree'] ?? $ordresReparation->motif_entree,
+            'notes_internes'     => $data['notes_internes'] ?? null,
+            'entretien_km_seuil' => $type === 'entretien' ? $palier : null,
+        ]);
+
+        // Pièces du palier ajoutées au devis principal (sans doublon, prix à venir du fournisseur)
+        $ajoutees = 0;
+        if ($request->boolean('ajouter_pieces_palier') && $palier && $vehicule->type_moteur_id) {
+            $ordresReparation->load('allDevis.lignes', 'allDevis.ordreReparation.facture');
+            $devis = $ordresReparation->devisPrincipal()
+                ?? $ordresReparation->allDevis->whereIn('statut', ['brouillon', 'envoye'])->last();
+            if ($devis && ! $devis->estFige()) {
+                $existantes = $devis->lignes->pluck('designation')->map(fn ($d) => mb_strtolower(trim($d)));
+                $taches = EntretienService::piecesDuPalier($vehicule->type_moteur_id, $palier);
+                foreach ($taches as $tache) {
+                    $libelle = EntretienService::libellePiece($tache->designation);
+                    if ($existantes->contains(mb_strtolower($libelle)) || $existantes->contains(mb_strtolower(trim($tache->designation)))) continue;
+                    LigneDevis::create([
+                        'devis_id'      => $devis->id,
+                        'type'          => 'piece',
+                        'designation'   => $libelle,
+                        'quantite'      => 1,
+                        'prix_unitaire' => 0,
+                        'total_ht'      => 0,
+                    ]);
+                    $ajoutees++;
+                }
+                foreach (EntretienService::mainOeuvreDuPalier($vehicule->type_moteur_id, $palier) as $operation) {
+                    if ($existantes->contains(mb_strtolower($operation['designation']))) continue;
+                    LigneDevis::create([
+                        'devis_id'      => $devis->id,
+                        'type'          => 'main_oeuvre',
+                        'designation'   => $operation['designation'],
+                        'quantite'      => 1,
+                        'prix_unitaire' => $operation['prix_unitaire'],
+                        'total_ht'      => $operation['prix_unitaire'],
+                    ]);
+                    $ajoutees++;
+                }
+                if ($ajoutees > 0) {
+                    $devis->load('lignes');
+                    $devis->recalculer();
+                    \App\Services\DevisWorkflowService::resynchroniserBonCommande($devis->fresh('lignes'));
+                }
+            }
+        }
+
+        $details = [];
+        if ((int) $ancienPalier !== (int) $palier) {
+            $details[] = 'palier d\'entretien ' . ($ancienPalier ? number_format($ancienPalier, 0, ',', ' ') . ' km' : 'aucun')
+                . ' → ' . ($palier ? number_format($palier, 0, ',', ' ') . ' km' : 'aucun');
+        }
+        if ($ajoutees > 0) {
+            $details[] = "{$ajoutees} pièce(s) du palier ajoutée(s) au devis (prix à venir du fournisseur)";
+        }
+
+        Activite::journaliser('corriger_or', "Correction administrateur de l'OR {$ordresReparation->numero}" . ($details ? ' — ' . implode(' ; ', $details) : ''), $ordresReparation);
+
+        return redirect()->route('ordres-reparations.show', $ordresReparation)
+            ->with('success', 'OR corrigé.' . ($details ? ' ' . ucfirst(implode(' ; ', $details)) . '.' : ''));
+    }
+
+    /**
+     * Supprime entièrement un OR (administrateur) : devis, bons de commande,
+     * photos, notifications. Impossible s'il a déjà une facture. Le dossier de
+     * réception d'origine est conservé et repasse au statut « Nouveau ».
+     */
+    public function supprimer(OrdreReparation $ordresReparation)
+    {
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->isAdmin()) {
+            abort(403);
+        }
+
+        // Même annulée par avoir, une facture reste en comptabilité : l'OR est conservé
+        if ($ordresReparation->factures()->exists()) {
+            return back()->with('error', 'Impossible de supprimer cet OR : il a déjà été facturé (même une facture annulée par avoir est conservée).');
+        }
+
+        $numero   = $ordresReparation->numero;
+        $vehicule = $ordresReparation->vehicule?->immatriculation;
+
+        DB::transaction(function () use ($ordresReparation) {
+            // Devis (leurs lignes et bons de commande partent avec eux), puis BC restants
+            $ordresReparation->allDevis()->get()->each->delete();
+            \App\Models\BonCommande::where('or_id', $ordresReparation->id)->delete();
+            $ordresReparation->dossier?->update(['statut' => 'nouveau']);
+            $ordresReparation->delete();
+        });
+        // Photos ajoutées directement sur l'OR (celles de la réception restent au dossier)
+        Storage::disk('public')->deleteDirectory("photos-or/{$ordresReparation->id}");
+
+        Activite::journaliser('supprimer_or', "Suppression par l'administrateur de l'OR {$numero}" . ($vehicule ? " ({$vehicule})" : ''));
+
+        return redirect()->route('ordres-reparations.index')->with('success', "OR {$numero} supprimé.");
+    }
+
+    /**
+     * Retrouve un devis complémentaire accepté de cet OR (feuille 2, 3...), ou
+     * 404 s'il n'appartient pas à l'OR ou n'est pas une feuille complémentaire.
+     */
+    private function feuilleComplementaire(OrdreReparation $ordresReparation, Devis $devis): Devis
+    {
+        $ordresReparation->load('allDevis.bonCommande');
+        $feuille = $ordresReparation->devisComplementaires()->firstWhere('id', $devis->id);
+        if (! $feuille) abort(404);
+
+        return $feuille;
+    }
+
+    /**
+     * Affecte un technicien à la feuille de travail d'un devis complémentaire —
+     * indépendamment de la feuille 1 et des autres feuilles. Bloqué tant que le
+     * bon de commande pièces de CE devis n'est pas entièrement reçu.
+     */
+    public function affecterFeuille(Request $request, OrdreReparation $ordresReparation, Devis $devis)
+    {
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->hasPermission('affecter_technicien')) {
+            abort(403);
+        }
+
+        $devis = $this->feuilleComplementaire($ordresReparation, $devis);
+        if ($ordresReparation->travauxClos() || $devis->heure_debut_travaux) {
+            return back()->with('error', "Impossible d'affecter : la feuille du devis {$devis->numero} est déjà démarrée ou le véhicule n'est plus en travaux.");
+        }
+        if ($devis->attendPieces()) {
+            return back()->with('error', "Impossible d'affecter : le bon de commande pièces du devis {$devis->numero} n'est pas encore marqué \"Tout reçu\".");
+        }
+
+        $request->validate([
+            'technicien_id' => ['required', 'exists:techniciens,id'],
+            'service'       => ['required', 'in:rapide,mecanique,electricite,carrosserie,peinture'],
+            'duree_estimee' => ['nullable', 'numeric', 'min:0.25'],
+        ], [
+            'technicien_id.required' => 'Veuillez sélectionner un technicien.',
+            'technicien_id.exists'   => 'Le technicien sélectionné est introuvable.',
+            'service.required'       => 'Veuillez sélectionner le service concerné.',
+            'service.in'             => 'Le service sélectionné est invalide.',
+            'duree_estimee.numeric'  => 'La durée estimée doit être un nombre.',
+            'duree_estimee.min'      => 'La durée estimée doit être d\'au moins 15 minutes (0,25 heure).',
+        ]);
+
+        $devis->update([
+            'technicien_id'    => $request->technicien_id,
+            'service'          => $request->service,
+            'chef_id'          => Auth::id(),
+            'date_affectation' => now(),
+            'duree_estimee'    => $request->duree_estimee ? (float) $request->duree_estimee : null,
+        ]);
+
+        $tech = Technicien::find($request->technicien_id);
+        Activite::journaliser('affecter_technicien', "Affectation de {$tech->name} sur {$ordresReparation->numero} — devis complémentaire {$devis->numero}", $ordresReparation);
+        return back()->with('success', "Technicien affecté à la feuille du devis {$devis->numero}.");
+    }
+
+    /**
+     * Démarre les travaux d'une feuille complémentaire. Le véhicule passe (ou
+     * reste) « En cours ».
+     */
+    public function demarrerFeuille(OrdreReparation $ordresReparation, Devis $devis)
+    {
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->hasPermission('gerer_ordres')) {
+            abort(403);
+        }
+
+        $devis = $this->feuilleComplementaire($ordresReparation, $devis);
+        if (! $devis->isAffecte()) {
+            return back()->with('error', "Affectez d'abord un technicien à la feuille du devis {$devis->numero}.");
+        }
+        if ($ordresReparation->travauxClos() || $devis->heure_debut_travaux) {
+            return back()->with('error', "Impossible de démarrer : la feuille du devis {$devis->numero} est déjà démarrée ou le véhicule n'est plus en travaux.");
+        }
+
+        $devis->update(['heure_debut_travaux' => now()]);
+        if ($ordresReparation->estAvantAcceptationDevis() || $ordresReparation->statut === 'devis_accepte') {
+            $ordresReparation->update(['statut' => 'en_cours']);
+        }
+
+        Activite::journaliser('demarrer_travaux', "Démarrage des travaux sur {$ordresReparation->numero} — devis complémentaire {$devis->numero}", $ordresReparation);
+        return back()->with('success', "Travaux du devis {$devis->numero} démarrés — heure enregistrée.");
+    }
+
+    /**
+     * Termine les travaux d'une feuille complémentaire. Quand la feuille 1 et
+     * toutes les feuilles complémentaires sont terminées, le véhicule passe au
+     * contrôle qualité (ou prêt, pour un service gratuit).
+     */
+    public function terminerFeuille(OrdreReparation $ordresReparation, Devis $devis)
+    {
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->hasPermission('gerer_ordres')) {
+            abort(403);
+        }
+
+        $devis = $this->feuilleComplementaire($ordresReparation, $devis);
+        if (! $devis->heure_debut_travaux) {
+            return back()->with('error', "Les travaux du devis {$devis->numero} n'ont pas encore démarré.");
+        }
+        if ($ordresReparation->travauxClos() || $devis->heure_fin_travaux) {
+            return back()->with('error', "Impossible de terminer : la feuille du devis {$devis->numero} est déjà terminée ou le véhicule n'est plus en travaux.");
+        }
+
+        $devis->update(['heure_fin_travaux' => now()]);
+        Activite::journaliser('terminer_travaux', "Fin des travaux sur {$ordresReparation->numero} — devis complémentaire {$devis->numero}", $ordresReparation);
+
+        $ordresReparation->load('allDevis');
+        if ($ordresReparation->heure_fin_travaux && $ordresReparation->feuillesComplementairesTerminees()) {
+            $ordresReparation->update(['statut' => $ordresReparation->service_gratuit ? 'pret' : 'controle_qualite']);
+            return back()->with('success', "Travaux du devis {$devis->numero} terminés — toutes les feuilles sont terminées, passage à l'étape suivante.");
+        }
+
+        return back()->with('success', "Travaux du devis {$devis->numero} terminés — le véhicule reste en cours tant que les autres feuilles ne sont pas terminées.");
     }
 
     /**
@@ -465,6 +788,10 @@ class OrdreReparationController extends Controller
 
         if (! $user || ! $user->hasPermission('valider_qualite')) {
             abort(403);
+        }
+
+        if ($ordresReparation->statut !== 'controle_qualite') {
+            return back()->with('error', "Impossible de valider le contrôle qualité : l'OR {$ordresReparation->numero} n'est pas en contrôle qualité (statut « {$ordresReparation->getStatutLabel()} »).");
         }
 
         $responsableQualite = \App\Models\ParametreAtelier::get()->controle_qualite_technicien_id;
@@ -492,6 +819,10 @@ class OrdreReparationController extends Controller
 
         if (! $user || ! $user->hasPermission('valider_lavage')) {
             abort(403);
+        }
+
+        if ($ordresReparation->statut !== 'lavage') {
+            return back()->with('error', "Impossible de terminer le lavage : l'OR {$ordresReparation->numero} n'est pas au lavage (statut « {$ordresReparation->getStatutLabel()} »).");
         }
 
         $ordresReparation->update(['statut' => 'pret']);
@@ -566,11 +897,14 @@ class OrdreReparationController extends Controller
         if (! $user || ! $user->hasPermission('affecter_technicien')) {
             abort(403);
         }
-        // Bloquer si un BC pièces existe et n'est pas encore entièrement reçu
-        $bcEnAttente = $ordresReparation->bonsCommande()
-            ->whereIn('statut', ['en_attente', 'commande'])
-            ->exists();
-        if ($bcEnAttente) {
+        // Plus d'affectation une fois le véhicule sorti des travaux (contrôle, prêt, facturé…)
+        if (! $ordresReparation->peutEtreAffecte()) {
+            return back()->with('error', $ordresReparation->raisonEtapeRefusee('affecter un technicien'));
+        }
+        // Bloquer si le BC pièces de la feuille 1 n'est pas encore entièrement reçu
+        // (les BC des devis complémentaires ne bloquent que leur propre feuille)
+        $ordresReparation->load('allDevis.bonCommande');
+        if ($ordresReparation->bcBloquantFeuille1()) {
             return back()->with('error', 'Impossible d\'affecter : le bon de commande pièces n\'est pas encore marqué "Tout reçu".');
         }
 
@@ -595,8 +929,11 @@ class OrdreReparationController extends Controller
             'chef_id'          => Auth::id(),  // L'utilisateur qui affecte devient le chef responsable
             'date_affectation' => now(),
             'duree_estimee'    => $request->duree_estimee ? (float) $request->duree_estimee : null,
-            'statut'           => 'devis_accepte',
         ]);
+        // Une réaffectation en cours de travaux ne doit pas faire reculer le véhicule
+        if ($ordresReparation->estAvantAcceptationDevis() || $ordresReparation->statut === 'devis_accepte') {
+            $ordresReparation->update(['statut' => 'devis_accepte']);
+        }
 
         $tech = Technicien::find($request->technicien_id);
         Activite::journaliser('affecter_technicien', "Affectation de {$tech->name} sur {$ordresReparation->numero}", $ordresReparation);
@@ -677,21 +1014,64 @@ class OrdreReparationController extends Controller
      * Affiche la feuille de travail du mécanicien pour un OR.
      * Inclut les lignes du devis (pièces et main d'œuvre) pour guider les travaux.
      */
-    public function feuilletTravail(OrdreReparation $ordresReparation)
+    public function feuilletTravail(OrdreReparation $ordresReparation, ?Devis $devis = null)
     {
-        $ordresReparation->load(['client', 'vehicule.typeMoteur', 'conseiller', 'technicien', 'chef', 'controleQualitePar', 'allDevis.lignes']);
+        $ordresReparation->load(['client', 'vehicule.typeMoteur', 'conseiller', 'technicien', 'chef', 'controleQualitePar', 'allDevis.lignes', 'allDevis.technicien', 'allDevis.chef']);
+
+        $complementaires = $ordresReparation->devisComplementaires();
+
+        // Feuille d'un devis complémentaire : uniquement ses propres lignes, son
+        // technicien et son pointage — pas les tableaux d'entretien périodique.
+        if ($devis) {
+            $index = $complementaires->search(fn ($d) => $d->id === $devis->id);
+            if ($index === false) abort(404);
+            $devis = $complementaires[$index];
+
+            $feuille = [
+                'numero'           => $index + 2,
+                'total'            => $complementaires->count() + 1,
+                'complementaire'   => true,
+                'devis'            => collect([$devis]),
+                'technicien'       => $devis->technicien?->name,
+                'chef'             => $devis->chef?->name,
+                'service_label'    => $devis->getServiceLabel(),
+                'date_affectation' => $devis->date_affectation,
+                'duree_estimee'    => $devis->duree_estimee !== null ? (float) $devis->duree_estimee : null,
+                'heure_debut'      => $devis->heure_debut_travaux,
+                'heure_fin'        => $devis->heure_fin_travaux,
+                'duree_reelle'     => $devis->getDureeReelleHeures(),
+            ];
+
+            return view('ordres-reparations.feuille-travail', ['or' => $ordresReparation, 'tachesEntretien' => null, 'feuille' => $feuille]);
+        }
+
+        // Feuille 1 : premier devis accepté (sans devis accepté : tous les devis
+        // non refusés, comme avant), avec l'affectation et le pointage de l'OR.
+        $principal = $ordresReparation->devisPrincipal();
+        $feuille = [
+            'numero'           => 1,
+            'total'            => $complementaires->count() + 1,
+            'complementaire'   => false,
+            'devis'            => $principal ? collect([$principal]) : $ordresReparation->allDevis->where('statut', '!=', 'refuse')->values(),
+            'technicien'       => $ordresReparation->technicien?->name,
+            'chef'             => $ordresReparation->chef?->name,
+            'service_label'    => $ordresReparation->getServiceLabel(),
+            'date_affectation' => $ordresReparation->date_affectation,
+            'duree_estimee'    => $ordresReparation->duree_estimee !== null ? (float) $ordresReparation->duree_estimee : null,
+            'heure_debut'      => $ordresReparation->heure_debut_travaux,
+            'heure_fin'        => $ordresReparation->heure_fin_travaux,
+            'duree_reelle'     => $ordresReparation->getDureeReelleHeures(),
+        ];
 
         $tachesEntretien = null;
         if ($ordresReparation->type === 'entretien' && $ordresReparation->entretien_km_seuil && $ordresReparation->vehicule->type_moteur_id) {
-            $tachesEntretien = \App\Models\EntretienTache::where('type_moteur_id', $ordresReparation->vehicule->type_moteur_id)
-                ->where('km_seuil', $ordresReparation->entretien_km_seuil)
-                ->whereIn('action', ['inspecter', 'nettoyer', 'lubrifier'])
-                ->orderBy('designation')
-                ->get()
-                ->groupBy('action');
+            $tachesEntretien = EntretienService::controlesDuPalier(
+                (int) $ordresReparation->vehicule->type_moteur_id,
+                (int) $ordresReparation->entretien_km_seuil
+            );
         }
 
-        return view('ordres-reparations.feuille-travail', ['or' => $ordresReparation, 'tachesEntretien' => $tachesEntretien]);
+        return view('ordres-reparations.feuille-travail', ['or' => $ordresReparation, 'tachesEntretien' => $tachesEntretien, 'feuille' => $feuille]);
     }
 
     /**
@@ -710,6 +1090,11 @@ class OrdreReparationController extends Controller
             abort(403);
         }
 
+        // Même contrôle que le bouton « Restituer » — un lien ou un onglet resté ouvert ne suffit plus
+        if (! $ordresReparation->peutEtreRestitue()) {
+            return redirect()->route('ordres-reparations.show', $ordresReparation)->with('error', $ordresReparation->raisonNonRestituable());
+        }
+
         $ordresReparation->load(['client', 'vehicule', 'conseiller', 'technicien', 'photosOr']);
         return view('ordres-reparations.restitution', ['or' => $ordresReparation]);
     }
@@ -717,7 +1102,8 @@ class OrdreReparationController extends Controller
     /**
      * Enregistre la restitution du véhicule et clôture l'OR.
      * Réservé au réceptionniste et à l'admin.
-     * Conditions préalables vérifiées côté vue (facture payée ou crédit accordé).
+     * Conditions vérifiées ici (et plus seulement par le bouton de la vue) : facture
+     * payée ou crédit accordé, ou service gratuit terminé.
      * Enregistre l'état de sortie complet et passe le statut à "livre".
      */
     public function restituer(Request $request, OrdreReparation $ordresReparation)
@@ -729,6 +1115,10 @@ class OrdreReparationController extends Controller
 
         if (! $user || ! $user->hasPermission('restituer_vehicule')) {
             abort(403);
+        }
+
+        if (! $ordresReparation->peutEtreRestitue()) {
+            return redirect()->route('ordres-reparations.show', $ordresReparation)->with('error', $ordresReparation->raisonNonRestituable());
         }
 
         $request->validate([
@@ -888,15 +1278,13 @@ class OrdreReparationController extends Controller
      */
     private function genererDevisEntretien(OrdreReparation $or, int $typeMoteurId, int $palier): void
     {
-        $piecesARemplacer = EntretienTache::where('type_moteur_id', $typeMoteurId)
-            ->where('km_seuil', $palier)
-            ->where('action', 'remplacer')
-            ->orderBy('designation')
-            ->get();
+        $piecesARemplacer = EntretienService::piecesDuPalier($typeMoteurId, $palier);
+        // Opérations du barème facturées en main-d'œuvre (ex : permutation des pneus)
+        $operations = EntretienService::mainOeuvreDuPalier($typeMoteurId, $palier);
 
-        if ($piecesARemplacer->isEmpty()) return;
+        if ($piecesARemplacer->isEmpty() && empty($operations)) return;
 
-        DB::transaction(function () use ($or, $piecesARemplacer) {
+        DB::transaction(function () use ($or, $piecesARemplacer, $operations) {
             $devis = Devis::create([
                 'numero'   => Devis::genererNumero(),
                 'or_id'    => $or->id,
@@ -904,16 +1292,29 @@ class OrdreReparationController extends Controller
                 'statut'   => 'brouillon',
             ]);
 
+            foreach ($operations as $operation) {
+                LigneDevis::create([
+                    'devis_id'      => $devis->id,
+                    'type'          => 'main_oeuvre',
+                    'designation'   => $operation['designation'],
+                    'quantite'      => 1,
+                    'prix_unitaire' => $operation['prix_unitaire'],
+                    'total_ht'      => $operation['prix_unitaire'],
+                ]);
+            }
+
             foreach ($piecesARemplacer as $tache) {
                 LigneDevis::create([
                     'devis_id'      => $devis->id,
                     'type'          => 'piece',
-                    'designation'   => $tache->designation,
+                    'designation'   => EntretienService::libellePiece($tache->designation),
                     'quantite'      => 1,
                     'prix_unitaire' => 0,
                     'total_ht'      => 0,
                 ]);
             }
+
+            $devis->recalculer();
         });
     }
 }

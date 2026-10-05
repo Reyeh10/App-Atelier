@@ -164,7 +164,7 @@
             <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2">
                     <span class="font-mono font-bold text-slate-800 text-sm">{{ $facture->numero }}</span>
-                    <span class="text-xs text-slate-500">— OR {{ $facture->ordreReparation->numero }}</span>
+                    <span class="text-xs text-slate-500">— {{ $facture->ordreReparation ? 'OR ' . $facture->ordreReparation->numero : 'Flotte ' . ($facture->vehicule?->immatriculation ?? '') }}</span>
                 </div>
                 <p class="text-xs text-slate-500 mt-0.5">Émise le {{ $facture->date_emission->format('d/m/Y') }}</p>
             </div>
@@ -182,7 +182,7 @@
         </div>
         <div class="text-right">
             <p class="text-xs text-slate-500">Total à encaisser</p>
-            <p class="text-2xl font-black text-orange-500" id="total-affiche">0,00 FDJ</p>
+            <p class="text-2xl font-black text-orange-500" id="total-affiche">0 FDJ</p>
         </div>
     </div>
     @endif
@@ -246,7 +246,7 @@ function toutSelectionner() {
 }
 
 function formatFDJ(n) {
-    return n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ' ').replace('.', ',');
+    return Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 }
 
 document.addEventListener('DOMContentLoaded', recalculerTotal);

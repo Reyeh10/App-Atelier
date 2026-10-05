@@ -42,6 +42,12 @@ class Reservation extends Model
     public function conseiller(): BelongsTo { return $this->belongsTo(User::class, 'conseiller_id'); }
     public function dossier(): HasOne       { return $this->hasOne(DossierReception::class, 'reservation_id'); }
 
+    /** Devis établi à l'avance pour cette réservation (le plus récent, hors devis refusés) */
+    public function devis(): HasOne
+    {
+        return $this->hasOne(Devis::class, 'reservation_id')->ofMany(['id' => 'max'], fn ($q) => $q->where('statut', '!=', 'refuse'));
+    }
+
     // ── Labels et couleurs ─────────────────────────────────────────────
 
     public function getCanalServiceLabel(): string
