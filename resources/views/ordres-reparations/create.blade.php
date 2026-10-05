@@ -885,9 +885,15 @@ function filtrerTypeMoteur(typeMoteurIdMemorise) {
 
     let nbVisibles = 0;
     options.forEach(o => {
-        const modeleType = (o.dataset.modele || '').toLowerCase().trim();
-        const correspond = modeleVehicule && modeleType && (
-            modeleVehicule.includes(modeleType) || modeleType.includes(modeleVehicule)
+        // Comparaison sans la marque (GWM, Haval, Great Wall) ni le suffixe du
+        // barème (HEV, PHEV, Diesel) : « Haval H6 » doit correspondre à « H6 HEV »
+        const noyau = s => (s || '').toLowerCase()
+            .replace(/\b(gwm|great\s+wall|haval|hev|phev|diesel)\b/g, ' ')
+            .replace(/\s+/g, ' ').trim();
+        const modeleType = noyau(o.dataset.modele);
+        const vehiculeNoyau = noyau(modeleVehicule);
+        const correspond = vehiculeNoyau && modeleType && (
+            vehiculeNoyau.includes(modeleType) || modeleType.includes(vehiculeNoyau)
         );
         o.hidden = modeleVehicule !== '' && !correspond;
         if (!o.hidden) nbVisibles++;

@@ -164,11 +164,6 @@
             </div>
         </div>
 
-    </div>
-
-    {{-- Colonne droite — Véhicules + Historique --}}
-    <div class="col-span-2 space-y-5">
-
         {{-- Véhicules --}}
         <div class="bg-white rounded-2xl border border-gray-200 p-5">
             <div class="flex items-center justify-between mb-4">
@@ -212,10 +207,15 @@
             @endif
         </div>
 
+    </div>
+
+    {{-- Colonne droite — Historique des interventions --}}
+    <div class="col-span-2 space-y-5">
+
         {{-- Historique OR --}}
         <div class="bg-white rounded-2xl border border-gray-200 p-5">
             <div class="flex items-center justify-between mb-4">
-                <h3 class="font-semibold text-slate-800">Historique des interventions</h3>
+                <h3 class="font-semibold text-slate-800">Historique des interventions ({{ $client->ordresReparations->count() }})</h3>
                 @if(auth()->user()->hasPermission('creer_dossiers'))
                 <a href="{{ route('reception.index', ['client_id' => $client->id]) }}"
                    class="text-sm text-orange-500 hover:text-orange-600 font-medium">+ Nouvelle Réception</a>
@@ -225,7 +225,8 @@
             @if($client->ordresReparations->isEmpty())
             <p class="text-sm text-slate-400 text-center py-6">Aucune intervention enregistrée.</p>
             @else
-            <div class="space-y-2">
+            {{-- Liste avec son propre défilement quand l'historique devient long --}}
+            <div class="space-y-2 overflow-y-auto" style="max-height: 560px; padding-right: 4px;">
                 @foreach($client->ordresReparations as $or)
                 <a href="{{ route('ordres-reparations.show', $or) }}"
                    class="flex items-center gap-4 p-3 rounded-xl border border-gray-100 hover:border-orange-200 hover:bg-orange-50 transition-colors">
@@ -250,4 +251,13 @@
 
     </div>
 </div>
+
+@if(auth()->user()->hasPermission('voir_factures'))
+{{-- ══ Pièces et main-d'œuvre facturées (tous ses véhicules) ═══════════ --}}
+@include('partials.lignes-facturees', [
+    'urlFiltre'   => route('clients.show', $client),
+    'sousTitre'   => 'Lignes des factures de ce client, tous véhicules confondus (les factures annulées par avoir ne sont pas comptées).',
+    'messageVide' => "Aucune pièce ni main-d'œuvre facturée pour ce client.",
+])
+@endif
 @endsection

@@ -107,9 +107,10 @@
 
     {{-- ── Bloc client / véhicule ── --}}
     @php
+        // Facture flotte (livraison de pièces sans OR) : véhicule et BC portés par la facture
         $or  = $facture->ordreReparation;
-        $veh = $or->vehicule;
-        $bc  = $or->devis?->bonCommande;
+        $veh = $or ? $or->vehicule : $facture->vehicule;
+        $bc  = $or ? $or->devis?->bonCommande : $facture->livraisonFlotte?->bonCommande;
     @endphp
     <div class="client-grid" style="margin-top:8px;">
         <div class="client-left">
@@ -131,7 +132,7 @@
             @endif
             <div class="client-row">
                 <span class="client-lbl">KM :</span>
-                <span class="client-val">{{ number_format($veh->kilometrage ?? 0, 0, ',', ' ') }}</span>
+                <span class="client-val">{{ number_format(($or ? null : $facture->livraisonFlotte?->kilometrage) ?? $veh?->kilometrage ?? 0, 0, ',', ' ') }}</span>
             </div>
             @if($bc)
             <div class="client-row">
@@ -143,11 +144,11 @@
         <div class="client-right">
             <div class="client-row">
                 <span class="client-lbl">N° du véhicule :</span>
-                <span class="client-val" style="font-weight:700;font-family:monospace;">{{ $veh->immatriculation }}</span>
+                <span class="client-val" style="font-weight:700;font-family:monospace;">{{ $veh?->immatriculation ?? '—' }}</span>
             </div>
             <div class="client-row">
                 <span class="client-lbl">Type de service :</span>
-                <span class="client-val">{{ $or->getServiceLabel() }}</span>
+                <span class="client-val">{{ $or ? $or->getServiceLabel() : 'Livraison de pièces' }}</span>
             </div>
             {{-- "Propriétaire" n'est utile que si le payeur (DOIT, ci-contre) diffère du
                  propriétaire du véhicule — cas d'une facture adressée au compte garantie
@@ -168,6 +169,16 @@
     </div>
 
     <hr class="thin">
+
+    @if($facture->statut === 'annulee' && $facture->avoir)
+    <div style="border:2px solid #c00;color:#c00;font-weight:900;text-align:center;padding:5px;margin:6px 0;font-size:11pt;">
+        FACTURE ANNULÉE PAR L'AVOIR N° {{ $facture->avoir->numero }} DU {{ $facture->avoir->date_emission->format('d/m/Y') }}
+    </div>
+    @elseif($facture->avoirOrigine)
+    <div style="border:1px solid #999;padding:4px 8px;margin:6px 0;font-size:9pt;">
+        Cette facture remplace la facture N° {{ $facture->avoirOrigine->facture->numero }}, annulée par l'avoir N° {{ $facture->avoirOrigine->numero }}.
+    </div>
+    @endif
 
     {{-- ── Tableau des prestations ── --}}
     @php
@@ -221,7 +232,7 @@
                 <td style="font-size:8pt;color:#555;">{{ $dateFacture }}</td>
                 <td style="font-family:monospace;font-size:8.5pt;">{{ $l->reference ?: '' }}</td>
                 <td style="font-weight:600;">{{ $l->designation }}</td>
-                <td class="c">{{ number_format($l->quantite, 0) }}</td>
+                <td class="c">{{ rtrim(rtrim(number_format($l->quantite, 2, ',', ' '), '0'), ',') }}</td>
                 <td class="c" style="font-size:8.5pt;">{{ $l->unite ?: 'PCS' }}</td>
                 <td class="r">{{ number_format($l->prix_unitaire, 0, ',', ' ') }}</td>
                 @if($hasRemiseF)

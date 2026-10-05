@@ -22,6 +22,17 @@ class LigneDevis extends Model
         'disponible'    => 'boolean',
     ];
 
+    // Prix et totaux toujours au franc (FDJ) — la quantité garde ses décimales
+    public function setPrixUnitaireAttribute($valeur): void
+    {
+        $this->attributes['prix_unitaire'] = $valeur === null || $valeur === '' ? 0 : round((float) $valeur);
+    }
+
+    public function setTotalHtAttribute($valeur): void
+    {
+        $this->attributes['total_ht'] = round((float) $valeur);
+    }
+
     public function devis(): BelongsTo
     {
         return $this->belongsTo(Devis::class);

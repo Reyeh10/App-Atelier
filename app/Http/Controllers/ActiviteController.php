@@ -5,12 +5,18 @@ namespace App\Http\Controllers;
 use App\Models\Activite;
 use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 
 class ActiviteController extends Controller
 {
     public function index(Request $request)
     {
-        if (! auth()->user()->hasPermission('voir_activites')) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->hasPermission('voir_activites')) {
+            abort(403);
+        }
 
         $query = Activite::orderByDesc('created_at');
 

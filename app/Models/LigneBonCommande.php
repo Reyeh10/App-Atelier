@@ -22,6 +22,13 @@ class LigneBonCommande extends Model
         'prix_unitaire'       => 'decimal:2',
     ];
 
+    // Prix fournisseur toujours au franc (FDJ)
+    public function setPrixUnitaireAttribute($valeur): void
+    {
+        $this->attributes['prix_unitaire'] = $valeur === null || $valeur === '' ? null : round((float) $valeur);
+    }
+
+
     public function bonCommande(): BelongsTo
     {
         return $this->belongsTo(BonCommande::class);

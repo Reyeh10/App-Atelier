@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Activite;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
@@ -52,6 +53,7 @@ class ProfilController extends Controller
             'password.different'                => 'Le nouveau mot de passe doit être différent de l\'actuel.',
         ]);
 
+        /** @var User $user */
         $user = $request->user();
         $user->update(['password' => Hash::make($request->password)]);
         Activite::journaliser('modifier_mot_de_passe', "{$user->name} a modifié son mot de passe", $user);
@@ -73,7 +75,9 @@ class ProfilController extends Controller
             'locale.in'       => 'Cette langue n\'est pas prise en charge.',
         ]);
 
-        $request->user()->update(['locale' => $data['locale']]);
+        /** @var User $user */
+        $user = $request->user();
+        $user->update(['locale' => $data['locale']]);
 
         return back()->with('success', 'Votre préférence de langue a été enregistrée. L\'interface reste en français pour le moment — la traduction complète sera activée prochainement.');
     }

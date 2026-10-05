@@ -78,7 +78,7 @@
                        class="font-mono font-bold text-orange-500 hover:underline text-sm">
                         {{ $facture->numero }}
                     </a>
-                    <span class="text-xs text-slate-500">— OR {{ $facture->ordreReparation->numero }}</span>
+                    <span class="text-xs text-slate-500">— {{ $facture->ordreReparation ? 'OR ' . $facture->ordreReparation->numero : 'Flotte ' . ($facture->vehicule?->immatriculation ?? '') }}</span>
                     <span class="px-2 py-0.5 rounded-full text-xs font-bold
                         @if($facture->statut === 'payee') bg-green-100 text-green-700
                         @else bg-blue-100 text-blue-700 @endif">

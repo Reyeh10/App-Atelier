@@ -111,4 +111,14 @@ return [
 
    'aliases' => Facade::defaultAliases()->toArray(),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Numéro de départ des factures (usage unique au lancement)
+    |--------------------------------------------------------------------------
+    | Dernier numéro de facture établi à la main avant la mise en service.
+    | Ne s'applique qu'à l'année 2026 ; à retirer après le lancement.
+    */
+
+    'facture_numero_depart' => (int) env('FACTURE_NUMERO_DEPART', 0),
+
 ];

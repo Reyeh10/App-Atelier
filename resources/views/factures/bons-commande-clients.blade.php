@@ -65,10 +65,15 @@
                     <td class="px-5 py-3 font-mono text-slate-600">{{ $facture->numero }}</td>
                     <td class="px-5 py-3 text-slate-700 font-medium">{{ $facture->payeur_nom }}</td>
                     <td class="px-5 py-3">
+                        @if($facture->ordreReparation)
                         <a href="{{ route('ordres-reparations.show', $facture->ordreReparation) }}"
                            class="font-mono text-orange-500 hover:underline text-xs">
                             {{ $facture->ordreReparation->numero }}
                         </a>
+                        @else
+                        <span class="text-xs bg-indigo-100 text-indigo-700 font-semibold px-1.5 py-0.5 rounded">Flotte</span>
+                        <span class="font-mono text-xs text-slate-600">{{ $facture->vehicule?->immatriculation }}</span>
+                        @endif
                     </td>
                     <td class="px-5 py-3 text-slate-500">{{ $facture->date_paiement?->format('d/m/Y') ?? '—' }}</td>
                     <td class="px-5 py-3 text-right font-bold text-slate-800">{{ number_format($facture->montant_ttc, 0, ',', ' ') }} FDJ</td>

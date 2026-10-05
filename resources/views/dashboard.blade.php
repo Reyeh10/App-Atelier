@@ -108,7 +108,7 @@
                                         </span>
                                     </td>
                                     <td class="px-4 py-2.5">
-                                        <span class="font-bold text-red-600">{{ $or->date_entree->diffInDays(now()) }} jours</span>
+                                        <span class="font-bold text-red-600">{{ (int) $or->date_entree->diffInDays(now()) }} jours</span>
                                         <span class="text-slate-400"> ({{ $or->date_entree->format('d/m') }})</span>
                                     </td>
                                     <td class="px-4 py-2.5 text-slate-500">{{ $or->technicien?->name ?? '—' }}</td>
@@ -442,7 +442,7 @@
                class="flex items-center justify-between p-3 rounded-xl bg-orange-50 hover:bg-orange-100 transition-colors">
                 <div>
                     <p class="text-xs font-bold text-slate-800 font-mono">{{ $bc->numero }}</p>
-                    <p class="text-xs text-slate-500 mt-0.5">OR {{ $bc->ordreReparation->numero }}</p>
+                    <p class="text-xs text-slate-500 mt-0.5">{{ $bc->ordreReparation ? 'OR ' . $bc->ordreReparation->numero : ($bc->vehicule?->immatriculation ?? '—') }}</p>
                 </div>
                 <span class="text-xs font-bold px-2 py-0.5 rounded-full
                     {{ $bc->statut === 'commande' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600' }}">

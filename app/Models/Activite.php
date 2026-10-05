@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\Auth;
 
 /**
  * Modèle Activite — Journal d'audit de toutes les actions dans l'application.
@@ -27,6 +28,18 @@ class Activite extends Model
         'created_at' => 'datetime',
     ];
 
+    /**
+     * L'heure est écrite par l'application (fuseau Africa/Djibouti) et non par
+     * MySQL : la valeur par défaut de la colonne (CURRENT_TIMESTAMP) suit le
+     * fuseau du serveur MySQL, en UTC chez l'hébergeur — 3 h de retard.
+     */
+    protected static function booted(): void
+    {
+        static::creating(function (Activite $activite) {
+            $activite->created_at ??= now();
+        });
+    }
+
     // ── Relations ──────────────────────────────────────────────────────
 
     /** Utilisateur qui a effectué l'action (peut être null si action système) */
@@ -49,7 +62,8 @@ class Activite extends Model
      */
     public static function journaliser(string $action, string $description, ?Model $sujet = null): void
     {
-        $user = auth()->user();
+        /** @var User|null $user */
+        $user = Auth::user();
         self::create([
             'user_id'       => $user?->id,
             'user_name'     => $user?->name ?? 'Système',  // "Système" si action automatique

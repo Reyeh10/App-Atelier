@@ -4,15 +4,22 @@ namespace App\Http\Controllers;
 
 use App\Models\NotificationInterne;
 use App\Models\OrdreReparation;
+use App\Models\User;
+use Illuminate\Support\Facades\Auth;
 
 class GarantieController extends Controller
 {
     public function index()
     {
-        if (! auth()->user()->hasPermission('voir_garanties')) abort(403);
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->hasPermission('voir_garanties')) {
+            abort(403);
+        }
 
         // Marquer toutes les notifications garantie comme lues
-        NotificationInterne::where('destinataire_id', auth()->id())
+        NotificationInterne::where('destinataire_id', $user->id)
             ->whereNull('lu_at')
             ->update(['lu_at' => now()]);
 

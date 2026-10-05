@@ -3,6 +3,15 @@
 @section('page-title', 'Devis')
 @section('page-subtitle', 'Tous les devis créés')
 
+@section('header-actions')
+@if(auth()->user()->hasPermission('gerer_devis'))
+<a href="{{ route('devis-avance.create') }}"
+   class="flex items-center gap-2 text-sm bg-orange-500 hover:bg-orange-600 text-white rounded-lg px-4 py-2 transition-colors font-medium">
+    + Devis sans réception
+</a>
+@endif
+@endsection
+
 @section('content')
 <div class="space-y-4">
 
@@ -31,9 +40,9 @@
                     <td class="px-5 py-3 text-slate-700">{{ $d->parent->client->nom_complet }}</td>
                     <td class="px-5 py-3 text-slate-500 font-mono text-xs">{{ $d->parent->vehicule->immatriculation }}</td>
                     <td class="px-5 py-3">
-                        <a href="{{ $d->or_id ? route('ordres-reparations.show', $d->or_id) : route('dossiers-reception.show', $d->dossier_id) }}"
+                        <a href="{{ $d->getParentUrl() }}"
                            class="font-mono text-orange-500 hover:underline text-xs">
-                            {{ $d->parent->numero }}
+                            {{ $d->estEnAvance() ? ($d->reservation_id ? 'Réservation ' . $d->parent->numero : 'Devis libre') : $d->parent->numero }}
                         </a>
                     </td>
                     <td class="px-5 py-3 text-right font-semibold text-slate-800">{{ number_format($d->montant_ttc, 0, ',', ' ') }} FDJ</td>

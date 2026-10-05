@@ -118,6 +118,42 @@
 
     </div>
 
+    {{-- Répartition pièces / main-d'œuvre (HT) — suit la période choisie en haut de page --}}
+    @php
+        $fmtQte        = fn ($q) => rtrim(rtrim(number_format($q, 2, ',', ' '), '0'), ',');
+        $totalPiecesMo = $totalPiecesHt + $totalMoHt;
+        $partPieces    = $totalPiecesMo > 0 ? round($totalPiecesHt / $totalPiecesMo * 100) : 0;
+        $partMo        = $totalPiecesMo > 0 ? 100 - $partPieces : 0;
+    @endphp
+    <div class="mt-6 bg-white rounded-2xl border border-gray-200 px-5 py-4">
+        <div class="flex items-center justify-between">
+            <p class="text-xs font-semibold text-slate-600 uppercase tracking-wider">Répartition du facturé (HT)</p>
+            <p class="text-xs text-slate-400">Hors TVA et frais de timbre</p>
+        </div>
+        <div class="mt-3 flex h-2 rounded-full overflow-hidden bg-gray-100">
+            <div style="width: {{ $partPieces }}%; background:#7c3aed"></div>
+            <div style="width: {{ $partMo }}%; background:#2563eb"></div>
+        </div>
+        <div class="grid grid-cols-2 gap-6 mt-4">
+            <div class="flex items-start gap-3">
+                <span class="w-2 h-2 rounded-full mt-2 flex-shrink-0" style="background:#7c3aed"></span>
+                <div>
+                    <p class="text-xs text-slate-500">Pièces</p>
+                    <p class="text-xl font-bold text-slate-800">{{ number_format($totalPiecesHt, 0, ',', ' ') }} <span class="text-sm font-medium text-slate-400">FDJ</span></p>
+                    <p class="text-xs text-slate-400">{{ $fmtQte($qtePieces) }} unité(s) · {{ $partPieces }} %</p>
+                </div>
+            </div>
+            <div class="flex items-start gap-3">
+                <span class="w-2 h-2 rounded-full mt-2 flex-shrink-0" style="background:#2563eb"></span>
+                <div>
+                    <p class="text-xs text-slate-500">Main-d'œuvre</p>
+                    <p class="text-xl font-bold text-slate-800">{{ number_format($totalMoHt, 0, ',', ' ') }} <span class="text-sm font-medium text-slate-400">FDJ</span></p>
+                    <p class="text-xs text-slate-400">{{ $fmtQte($heuresMo) }} h · {{ $partMo }} %</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
     {{-- Évolution CA sur 12 mois --}}
     <div class="mt-5">
         <p class="text-xs font-semibold text-green-700 uppercase tracking-wider mb-3">Évolution du CA encaissé — {{ now()->year }}</p>
@@ -196,18 +232,25 @@
 <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
     <div class="px-6 py-4 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
         <h3 class="text-sm font-bold text-slate-700 uppercase tracking-wider">Performance par technicien</h3>
-        <span class="text-xs text-slate-400">{{ $techniciens->count() }} mécaniciens</span>
+        <div class="flex items-center gap-3">
+            @if($techniciens->count() > 5)
+            <input type="text" placeholder="Rechercher un mécanicien…" oninput="filtrerTechniciens(this.value)"
+                   class="w-64 px-3 py-1.5 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-orange-500">
+            @endif
+            <span class="text-xs text-slate-400">{{ $techniciens->count() }} mécaniciens</span>
+        </div>
     </div>
     @if($techniciens->isEmpty())
     <div class="px-6 py-10 text-center text-slate-400 text-sm">Aucun mécanicien enregistré</div>
     @else
-    <div class="divide-y divide-gray-100">
+    {{-- Liste avec son propre défilement (comme le tableau de bord) --}}
+    <div class="divide-y divide-gray-100 overflow-y-auto" style="max-height: 420px;">
         @foreach($techniciens->sortByDesc('total') as $tech)
         @php
         $tauxCharge = $maxOrTech > 0 ? round($tech['total'] / $maxOrTech * 100) : 0;
         $tauxTermine = $tech['total'] > 0 ? round($tech['termines'] / $tech['total'] * 100) : 0;
         @endphp
-        <div class="px-6 py-4">
+        <div class="ligne-technicien px-6 py-4" data-nom="{{ strtolower($tech['nom']) }}">
             <div class="flex items-center gap-4">
                 <div class="w-9 h-9 rounded-full bg-orange-500 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
                     {{ strtoupper(substr($tech['nom'], 0, 1)) }}
@@ -373,4 +416,14 @@
 </div>
 
 </div>
+@push('scripts')
+<script>
+function filtrerTechniciens(q) {
+    q = q.toLowerCase().trim();
+    document.querySelectorAll('.ligne-technicien').forEach(el => {
+        el.style.display = !q || el.dataset.nom.includes(q) ? '' : 'none';
+    });
+}
+</script>
+@endpush
 @endsection

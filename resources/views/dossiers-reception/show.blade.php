@@ -11,9 +11,15 @@
         Voir l'OR {{ $dossier->ordreReparation->numero }} →
     </a>
     @endif
-    @if(auth()->user()->hasPermission('supprimer_dossiers') && ! $dossier->or_id)
+    @if(auth()->user()->isAdmin())
+    <a href="{{ route('dossiers-reception.corriger', $dossier) }}"
+       class="flex items-center gap-2 text-sm bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg px-3 py-2 transition-colors">
+        ✏️ Corriger
+    </a>
+    @endif
+    @if(auth()->user()->hasPermission('supprimer_dossiers') && (! $dossier->or_id || auth()->user()->isAdmin()))
     <form method="POST" action="{{ route('dossiers-reception.destroy', $dossier) }}"
-          onsubmit="return confirm('Supprimer le dossier {{ $dossier->numero }} ? Cette action est irréversible.')">
+          onsubmit="return confirm('Supprimer le dossier {{ $dossier->numero }} ?{{ $dossier->or_id ? ' L’OR, ses devis et ses photos sont conservés.' : '' }} Cette action est irréversible.')">
         @csrf @method('DELETE')
         <button type="submit" class="flex items-center gap-2 text-sm bg-red-50 hover:bg-red-100 text-red-600 rounded-lg px-3 py-2 transition-colors">
             Supprimer

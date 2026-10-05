@@ -49,6 +49,16 @@
                 Tableau de bord
             </x-nav-link>
 
+            @if(auth()->user()->hasPermission('voir_ordres'))
+            <x-nav-link href="{{ route('surveillance-atelier.index') }}" :active="request()->routeIs('surveillance-atelier.*')">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                </svg>
+                Surveillance atelier
+            </x-nav-link>
+            @endif
+
             @php
                 $u = auth()->user();
                 $nbOrOuvert   = $u->hasPermission('voir_ordres') ? \App\Models\OrdreReparation::where('statut', 'ouvert')->count() : 0;
@@ -58,22 +68,23 @@
                     : 0;
                 $nbFacturesNonPayees = $u->hasPermission('voir_factures') ? \App\Models\Facture::where('statut', 'emise')->count() : 0;
                 $nbAFacturer = $u->hasPermission('creer_factures')
-                    ? \App\Models\OrdreReparation::where('statut', 'pret')->where('service_gratuit', false)->whereDoesntHave('facture')->count()
+                    ? \App\Models\OrdreReparation::aFacturer()->count()
                     : 0;
                 $nbBcAReceptionner  = $u->hasPermission('voir_bons_commande')
                     ? \App\Models\BonCommande::where('statut', '!=', 'recu')
+                        ->whereNull('vehicule_id') // BC flotte : les pièces vont directement au client, pas de réception au garage
                         ->whereHas('lignes')
                         ->whereDoesntHave('lignes', fn($q) => $q->where('disponible', false)->orWhereNull('disponible'))
                         ->count()
+                    : 0;
+                $nbLivraisonsFlotteAFacturer = $u->hasPermission('creer_factures')
+                    ? \App\Models\LivraisonFlotte::aFacturer()->count()
                     : 0;
                 $nbDossiersDiagnostic  = $u->hasPermission('voir_dossiers')
                     ? \App\Models\DossierReception::whereIn('statut', ['nouveau', 'diagnostic'])->count()
                     : 0;
                 $nbDossiersDevisEnCours = $u->hasPermission('voir_dossiers')
                     ? \App\Models\DossierReception::where('statut', 'devis_en_cours')->count()
-                    : 0;
-                $nbDossiersAttenteClient = $u->hasPermission('voir_dossiers')
-                    ? \App\Models\DossierReception::where('statut', 'en_attente_client')->count()
                     : 0;
             @endphp
 
@@ -110,7 +121,7 @@
                         <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
                     </svg>
                     <span class="flex-1 text-left">Réception</span>
-                    @php $nbDossiersEnCours = $nbDossiersDiagnostic + $nbDossiersDevisEnCours + $nbDossiersAttenteClient; @endphp
+                    @php $nbDossiersEnCours = $nbDossiersDiagnostic + $nbDossiersDevisEnCours; @endphp
                     @if($nbDossiersEnCours > 0 && !$receptionActive)
                     <span class="inline-flex items-center justify-center bg-blue-500 text-white text-[11px] font-bold min-w-[19px] h-[19px] px-1 rounded-full flex-shrink-0">{{ $nbDossiersEnCours > 99 ? '99+' : $nbDossiersEnCours }}</span>
                     @endif
@@ -157,17 +168,6 @@
                         <span class="flex-1">Devis en cours</span>
                         @if($nbDossiersDevisEnCours > 0)
                         <span class="inline-flex items-center justify-center bg-orange-500 text-white text-[11px] font-bold min-w-[19px] h-[19px] px-1 rounded-full flex-shrink-0">{{ $nbDossiersDevisEnCours > 99 ? '99+' : $nbDossiersDevisEnCours }}</span>
-                        @endif
-                    </a>
-
-                    <a href="{{ route('dossiers-reception.index', ['statut' => 'en_attente_client']) }}"
-                       class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors
-                              {{ request('statut') === 'en_attente_client'
-                                 ? 'text-white bg-slate-700' : 'text-slate-400 hover:bg-slate-800 hover:text-white' }}">
-                        <span class="w-1.5 h-1.5 rounded-full bg-gray-400 flex-shrink-0"></span>
-                        <span class="flex-1">En attente du client</span>
-                        @if($nbDossiersAttenteClient > 0)
-                        <span class="inline-flex items-center justify-center bg-gray-500 text-white text-[11px] font-bold min-w-[19px] h-[19px] px-1 rounded-full flex-shrink-0">{{ $nbDossiersAttenteClient > 99 ? '99+' : $nbDossiersAttenteClient }}</span>
                         @endif
                     </a>
 
@@ -331,6 +331,30 @@
                     <path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
                 </svg>
                 Techniciens
+            </x-nav-link>
+            @endif
+
+            {{-- Flotte : pièces livrées aux sociétés qui ont leur propre atelier (ni réception, ni OR) --}}
+            @if($u->hasPermission('voir_factures'))
+            <div class="pt-3 pb-1">
+                <p class="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Flotte</p>
+            </div>
+
+            <x-nav-link href="{{ route('flotte.index') }}" :active="request()->routeIs('flotte.index') || request()->routeIs('flotte.show') || request()->routeIs('flotte.facturer*') || request()->routeIs('flotte.importer*')">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M8 7h8m-8 4h8m-9 8h10a2 2 0 002-2V7a4 4 0 00-4-4H9a4 4 0 00-4 4v10a2 2 0 002 2zm0 0v2m10-2v2M7 15h.01M17 15h.01"/>
+                </svg>
+                <span class="flex-1">Livraisons flotte</span>
+                @if($nbLivraisonsFlotteAFacturer > 0)
+                <span class="inline-flex items-center justify-center bg-green-500 text-white text-[11px] font-bold min-w-[19px] h-[19px] px-1 rounded-full flex-shrink-0">{{ $nbLivraisonsFlotteAFacturer > 99 ? '99+' : $nbLivraisonsFlotteAFacturer }}</span>
+                @endif
+            </x-nav-link>
+
+            <x-nav-link href="{{ route('flotte.rapport') }}" :active="request()->routeIs('flotte.rapport')">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                </svg>
+                Pièces par bus
             </x-nav-link>
             @endif
 

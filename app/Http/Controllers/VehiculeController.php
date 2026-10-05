@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Activite;
 use App\Models\Client;
+use App\Models\LigneFacture;
 use App\Models\User;
 use App\Models\Vehicule;
 use Illuminate\Http\JsonResponse;
@@ -410,7 +411,7 @@ class VehiculeController extends Controller
     /**
      * Affiche la fiche détaillée d'un véhicule.
      */
-    public function show(Vehicule $vehicule): View
+    public function show(Request $request, Vehicule $vehicule): View
     {
         $vehicule->load([
             'client',
@@ -418,8 +419,7 @@ class VehiculeController extends Controller
             'ordresReparations' => function ($query) {
                 $query
                     ->with('client')
-                    ->latest()
-                    ->limit(20);
+                    ->latest();
             },
         ]);
 
@@ -444,11 +444,39 @@ class VehiculeController extends Controller
             $clients = collect();
         }
 
+        /*
+        |--------------------------------------------------------------------------
+        | Pièces et main-d'œuvre facturées pour ce véhicule
+        |--------------------------------------------------------------------------
+        | Lignes des factures de tous ses OR (factures annulées par avoir exclues),
+        | filtrables par période (date de facture) et par type. Réservé aux
+        | utilisateurs qui voient les factures.
+        */
+
+        $request->validate([
+            'date_debut' => ['nullable', 'date'],
+            'date_fin'   => ['nullable', 'date'],
+        ]);
+
+        $filtresLignes = [
+            'date_debut' => $request->get('date_debut'),
+            'date_fin'   => $request->get('date_fin'),
+            'type'       => in_array($request->get('type'), ['piece', 'main_oeuvre'], true) ? $request->get('type') : '',
+        ];
+
+        $lignesFacturees = collect();
+
+        if ($user->hasPermission('voir_factures')) {
+            $lignesFacturees = LigneFacture::historique($vehicule->id, null, $filtresLignes);
+        }
+
         return view(
             'vehicules.show',
             compact(
                 'vehicule',
-                'clients'
+                'clients',
+                'lignesFacturees',
+                'filtresLignes'
             )
         );
     }

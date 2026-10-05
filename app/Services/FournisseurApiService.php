@@ -29,9 +29,12 @@ class FournisseurApiService
         // Le BC part désormais dès la création du devis, avant qu'un OR n'existe
         // forcément (devis encore rattaché à un dossier de réception) — on lit
         // le véhicule/client depuis l'OR s'il existe déjà, sinon depuis le dossier.
-        $bc->loadMissing('lignes', 'ordreReparation.vehicule', 'ordreReparation.client', 'dossier.vehicule', 'dossier.client');
-        $vehicule = $bc->ordreReparation?->vehicule ?? $bc->dossier?->vehicule;
-        $client   = $bc->ordreReparation?->client ?? $bc->dossier?->client;
+        // Devis en avance (réservation / devis libre) : ni OR ni dossier encore,
+        // le véhicule et le client sont portés par le devis lui-même.
+        $bc->loadMissing('lignes', 'ordreReparation.vehicule', 'ordreReparation.client', 'dossier.vehicule', 'dossier.client', 'devis.vehicule', 'devis.client', 'vehiculeDirect', 'clientDirect');
+        // BC flotte (import Excel) : ni OR, ni dossier, ni devis — le BC porte le bus et le client
+        $vehicule = $bc->vehicule;
+        $client   = $bc->client;
 
         $payload = [
             'numero' => $bc->numero,
@@ -68,6 +71,39 @@ class FournisseurApiService
             $this->enregistrerReponse($bc, $response->json());
         } catch (\Throwable $e) {
             Log::warning("Impossible de joindre le système fournisseur pour {$bc->numero} : {$e->getMessage()}");
+        }
+    }
+
+    /**
+     * Prévient le magasin que le bon de commande est annulé (devis refusé, ou
+     * plus aucune pièce) : il ne doit plus préparer ni transférer ces pièces.
+     * Appel non bloquant, comme l'envoi du BC.
+     *
+     * Côté magasin : POST {STCD_MAGASIN_URL}/bons-commande/{numero}/annuler
+     * avec le champ « motif » (route à ajouter dans stcd-magasin).
+     */
+    public function annulerBonCommande(BonCommande $bc, string $motif): void
+    {
+        $url = config('services.stcd_magasin.url');
+        $token = config('services.stcd_magasin.token');
+
+        if (! $url || ! $token) {
+            Log::warning("Annulation fournisseur ignorée pour {$bc->numero} : STCD_MAGASIN_URL/TOKEN non configurés.");
+            return;
+        }
+
+        try {
+            $response = Http::withToken($token)
+                ->acceptJson()
+                ->withoutRedirecting()
+                ->timeout(5)
+                ->post(rtrim($url, '/').'/bons-commande/'.rawurlencode($bc->numero).'/annuler', ['motif' => $motif]);
+
+            if (! $response->successful()) {
+                Log::warning("Annulation du BC {$bc->numero} refusée par le fournisseur : HTTP {$response->status()} — {$response->body()}");
+            }
+        } catch (\Throwable $e) {
+            Log::warning("Impossible de prévenir le fournisseur de l'annulation du BC {$bc->numero} : {$e->getMessage()}");
         }
     }
 

@@ -4,6 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Models\Activite;
 use App\Models\Client;
+use App\Models\LigneFacture;
+use App\Models\User;
+use App\Models\Vehicule;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -448,6 +451,7 @@ class ClientController extends Controller
     |--------------------------------------------------------------------------
     */
     public function show(
+        Request $request,
         Client $client
     ): View {
         $client->load([
@@ -455,16 +459,56 @@ class ClientController extends Controller
 
             'ordresReparations' =>
                 function ($query) {
+                    // Tout l'historique (la liste défile) : le compteur « OR total »
+                    // ne s'arrête plus à 10
                     $query
                         ->with('vehicule')
-                        ->latest()
-                        ->limit(10);
+                        ->latest();
                 },
         ]);
 
+        /*
+        |--------------------------------------------------------------------------
+        | Pièces et main-d'œuvre facturées à ce client
+        |--------------------------------------------------------------------------
+        | Lignes de toutes ses factures (tous véhicules), filtrables par véhicule,
+        | par période et par type. Réservé aux utilisateurs qui voient les factures.
+        */
+
+        $request->validate([
+            'date_debut'  => ['nullable', 'date'],
+            'date_fin'    => ['nullable', 'date'],
+            'vehicule_id' => ['nullable', 'integer'],
+        ]);
+
+        $filtresLignes = [
+            'date_debut'  => $request->get('date_debut'),
+            'date_fin'    => $request->get('date_fin'),
+            'type'        => in_array($request->get('type'), ['piece', 'main_oeuvre'], true) ? $request->get('type') : '',
+            'vehicule_id' => $request->filled('vehicule_id') ? (int) $request->get('vehicule_id') : null,
+        ];
+
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        $lignesFacturees = collect();
+        $vehiculesFiltre = collect();
+
+        if ($user && $user->hasPermission('voir_factures')) {
+            $lignesFacturees = LigneFacture::historique($filtresLignes['vehicule_id'], $client->id, $filtresLignes);
+
+            // Ses véhicules actuels + ceux qui lui ont été facturés avant d'être vendus
+            $idsFactures = LigneFacture::historique(null, $client->id, ['type' => ''])
+                ->map(fn ($l) => $l->facture->vehicule_id ?? $l->facture->ordreReparation?->vehicule_id)
+                ->filter();
+            $vehiculesFiltre = Vehicule::whereIn('id', $client->vehicules->pluck('id')->merge($idsFactures)->unique())
+                ->orderBy('immatriculation')
+                ->get();
+        }
+
         return view(
             'clients.show',
-            compact('client')
+            compact('client', 'lignesFacturees', 'filtresLignes', 'vehiculesFiltre')
         );
     }
 

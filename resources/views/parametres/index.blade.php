@@ -368,7 +368,7 @@ $nomsJours = [
                     <span class="text-sm text-slate-700 dark:text-slate-200">Entretien périodique</span>
                     <div class="flex items-center gap-2 flex-shrink-0">
                         <input type="number" name="tarifs[entretien_periodique]" min="0" step="1"
-                               value="{{ old('tarifs.entretien_periodique', $tarifs['entretien_periodique'] ?? '') }}"
+                               value="{{ old('tarifs.entretien_periodique', isset($tarifs['entretien_periodique']) ? (int) round($tarifs['entretien_periodique']) : '') }}"
                                placeholder="0"
                                class="w-24 px-3 py-1.5 border border-gray-300 dark:border-slate-600 rounded-lg text-sm text-right
                                       bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-green-500">
@@ -419,6 +419,36 @@ $nomsJours = [
         </form>
     </div>
 
+    {{-- ── Main-d'œuvre flotte ───────────────────────────────────── --}}
+    <div class="mt-6 bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-700 overflow-hidden max-w-xl">
+        <div class="px-6 py-4 border-b border-gray-100 dark:border-slate-700 flex items-center gap-3">
+            <div class="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-slate-700 flex items-center justify-center flex-shrink-0">
+                <svg class="w-5 h-5 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M8 7h8m-8 4h8m-9 8h10a2 2 0 002-2V7a4 4 0 00-4-4H9a4 4 0 00-4 4v10a2 2 0 002 2zm0 0v2m10-2v2M7 15h.01M17 15h.01"/>
+                </svg>
+            </div>
+            <div>
+                <h2 class="font-semibold text-slate-800 dark:text-slate-100">Main-d'œuvre flotte</h2>
+                <p class="text-xs text-slate-500 dark:text-slate-400">Ajoutée automatiquement à chaque facture de bus (livraisons flotte), sauf si le fichier Excel contient déjà une main-d'œuvre pour ce bus — modifiable avant de créer la facture</p>
+            </div>
+        </div>
+
+        <form method="POST" action="{{ route('parametres.main-oeuvre-flotte.update') }}" class="px-6 py-4 flex gap-3 items-end">
+            @csrf @method('PATCH')
+            <div class="flex-1">
+                <label class="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Montant HT par facture (FDJ)</label>
+                <input type="number" name="main_oeuvre_flotte" min="0" step="1" required
+                       value="{{ old('main_oeuvre_flotte', $parametreAtelier->main_oeuvre_flotte) }}"
+                       class="w-full px-3 py-2.5 border border-gray-300 dark:border-slate-600 rounded-xl text-sm
+                              bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <p class="text-xs text-slate-400 dark:text-slate-500 mt-1">0 = ne rien ajouter.</p>
+            </div>
+            <button type="submit" class="px-6 py-2.5 bg-indigo-500 hover:bg-indigo-600 text-white text-sm font-semibold rounded-xl transition-colors">
+                Enregistrer
+            </button>
+        </form>
+    </div>
+
     {{-- ── Catalogue Services Rapides ("Autre") ──────────────────── --}}
     <div class="mt-6 bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-700 overflow-hidden">
         <div class="px-6 py-4 border-b border-gray-100 dark:border-slate-700 flex items-center gap-3">
@@ -456,7 +486,7 @@ $nomsJours = [
                     </div>
 
                     <div class="flex items-center gap-1.5">
-                        <input type="number" name="tarif" min="0" step="1" value="{{ old('tarif', $service->tarif) }}"
+                        <input type="number" name="tarif" min="0" step="1" value="{{ old('tarif', (int) round($service->tarif)) }}"
                                class="w-24 px-2 py-1.5 border border-gray-300 dark:border-slate-600 rounded-lg text-sm text-right
                                       bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-teal-500">
                         <span class="text-xs text-slate-400">FDJ</span>
@@ -579,7 +609,7 @@ $nomsJours = [
 
                 <form method="POST" action="{{ route('parametres.marques-garantie.update', $marque) }}" class="flex items-center gap-2">
                     @csrf @method('PATCH')
-                    <input type="number" name="plafond_credit" min="0" step="1" value="{{ old('plafond_credit', $marque->plafond_credit) }}"
+                    <input type="number" name="plafond_credit" min="0" step="1" value="{{ old('plafond_credit', (int) round($marque->plafond_credit)) }}"
                            class="w-32 px-3 py-1.5 border border-gray-300 dark:border-slate-600 rounded-lg text-sm text-right
                                   bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">
                     <span class="text-xs text-slate-400">FDJ</span>

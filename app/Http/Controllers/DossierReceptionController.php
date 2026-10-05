@@ -6,7 +6,6 @@ use App\Models\Activite;
 use App\Models\Client;
 use App\Models\Devis;
 use App\Models\DossierReception;
-use App\Models\EntretienTache;
 use App\Models\LigneDevis;
 use App\Models\Reservation;
 use App\Models\Vehicule;
@@ -139,7 +138,11 @@ class DossierReceptionController extends Controller
                 \Illuminate\Validation\Rule::requiredIf(fn () => $request->input('motif_visite') === 'service_rapide'),
                 'nullable', 'exists:reservations,id',
             ],
-            'type_moteur_id'         => ['nullable', 'exists:types_moteur,id'],
+            // Entretien périodique : sans type de moteur, aucun palier → devis et feuille de travail vides
+            'type_moteur_id'         => [
+                \Illuminate\Validation\Rule::requiredIf(fn () => $request->input('motif_visite') === 'service_rapide' && $request->input('canal_service') === 'entretien_periodique'),
+                'nullable', 'exists:types_moteur,id',
+            ],
             'kilometrage_entree'     => ['required', 'integer', 'min:0'],
             'niveau_carburant'       => ['required', 'in:vide,1/4,1/2,3/4,plein'],
             'proprete_interne'       => ['nullable', 'in:bon,acceptable,mauvais'],
@@ -159,6 +162,7 @@ class DossierReceptionController extends Controller
             'photos_vehicule'        => ['required', 'array', 'min:1', 'max:10'],
             'photos_vehicule.*'      => ['file', 'mimes:jpg,jpeg,png,webp', 'max:8192'],
         ], [
+            'type_moteur_id.required'     => "Choisissez le type de moteur : c'est lui qui donne les pièces et les contrôles du barème d'entretien.",
             'client_id.required'          => 'Veuillez sélectionner un client.',
             'client_id.exists'            => 'Le client sélectionné est introuvable.',
             'vehicule_id.required'        => 'Veuillez sélectionner un véhicule.',
@@ -232,7 +236,37 @@ class DossierReceptionController extends Controller
         // Service Rapide : devis auto-généré en brouillon (main d'œuvre à prix fixe
         // + pièces du barème si entretien périodique) — le chef d'atelier le relit,
         // l'ajuste si besoin, puis le valide (envoyé → accepté) comme un devis normal.
-        if ($dossier->motif_visite === 'service_rapide') {
+        // Réservation avec un devis établi à l'avance (cf. DevisAvanceController) :
+        // le dossier reprend ce devis — prix annoncé au client — au lieu d'en
+        // générer un nouveau. Jamais accepté à l'avance, il reste modifiable ici
+        // puis est validé comme un devis de dossier normal (envoyé → accepté).
+        $devisAvance = $dossier->reservation_id
+            ? Devis::where('reservation_id', $dossier->reservation_id)
+                ->whereNull('or_id')->whereNull('dossier_id')
+                ->where('statut', '!=', 'refuse')
+                ->latest('id')->first()
+            : null;
+        // Devis libre (« Devis sans réception ») préparé pour ce véhicule : repris
+        // de la même façon, au lieu de rester en avance à côté du nouveau dossier
+        $devisAvance ??= Devis::where('vehicule_id', $dossier->vehicule_id)
+            ->whereNull('reservation_id')->whereNull('or_id')->whereNull('dossier_id')
+            ->where('statut', '!=', 'refuse')
+            ->latest('id')->first();
+        $alertePalier = null;
+
+        if ($devisAvance) {
+            $devisAvance->update(['dossier_id' => $dossier->id]);
+            $devisAvance->bonCommande?->update(['dossier_id' => $dossier->id]);
+            $dossier->update(['statut' => 'devis_en_cours']);
+
+            // Le kilométrage réel donne un autre palier que celui prévu : on garde
+            // le devis annoncé au client, mais on prévient pour ajustement éventuel.
+            if ($entretienPalier && $devisAvance->entretien_km_seuil && (int) $entretienPalier !== (int) $devisAvance->entretien_km_seuil) {
+                $alertePalier = "Attention : le devis en avance {$devisAvance->numero} a été établi pour le palier "
+                    . number_format($devisAvance->entretien_km_seuil, 0, ',', ' ') . ' km, mais le kilométrage relevé correspond au palier '
+                    . number_format($entretienPalier, 0, ',', ' ') . ' km. Vérifiez le devis et ajustez-le si besoin.';
+            }
+        } elseif ($dossier->motif_visite === 'service_rapide') {
             $this->genererDevisServiceRapide($dossier, $typeMoteurId, $entretienPalier);
         }
 
@@ -243,8 +277,11 @@ class DossierReceptionController extends Controller
 
         Activite::journaliser('creer_dossier', "Création du dossier {$dossier->numero} — {$dossier->client->nom_complet} / {$dossier->vehicule->immatriculation}", $dossier);
 
-        return redirect()->route('dossiers-reception.show', $dossier)
-            ->with('success', "Dossier {$dossier->numero} créé avec succès.");
+        $redirection = redirect()->route('dossiers-reception.show', $dossier)
+            ->with('success', "Dossier {$dossier->numero} créé avec succès."
+                . ($devisAvance ? " Le devis en avance {$devisAvance->numero} a été repris." : ''));
+
+        return $alertePalier ? $redirection->with('error', $alertePalier) : $redirection;
     }
 
     /**
@@ -281,23 +318,37 @@ class DossierReceptionController extends Controller
         if (! $user || ! $user->hasPermission('supprimer_dossiers')) {
             abort(403);
         }
-        if ($dossier->or_id) {
+        // Un OR existe déjà : seul l'administrateur peut encore supprimer le dossier
+        // (l'OR, ses devis et ses photos sont conservés).
+        if ($dossier->or_id && ! $user->isAdmin()) {
             return back()->with('error', "Impossible de supprimer {$dossier->numero} : un OR a déjà été créé à partir de ce dossier.");
         }
 
         $numero = $dossier->numero;
+        $avecOr = (bool) $dossier->or_id;
 
-        DB::transaction(function () use ($dossier) {
+        DB::transaction(function () use ($dossier, $avecOr) {
             foreach ($dossier->devis as $devis) {
+                // Devis déjà passé à l'OR : il appartient à l'OR, on n'y touche pas
+                if ($devis->or_id) continue;
+                // Devis en avance repris de la réservation : il lui est rendu
+                if ($devis->reservation_id) {
+                    $devis->update(['dossier_id' => null]);
+                    $devis->bonCommande?->update(['dossier_id' => null]);
+                    continue;
+                }
                 $devis->lignes()->delete();
                 $devis->delete();
             }
 
-            foreach ($dossier->photos ?? [] as $photo) {
-               Storage::disk('public')->delete($photo['chemin']);
+            // Photos : partagées avec l'OR s'il existe (mêmes fichiers) — conservées
+            if (! $avecOr) {
+                foreach ($dossier->photos ?? [] as $photo) {
+                   Storage::disk('public')->delete($photo['chemin']);
+                }
             }
 
-            if ($dossier->reservation_id) {
+            if ($dossier->reservation_id && ! $avecOr) {
                 $dossier->reservation()->update(['statut' => 'planifie']);
             }
 
@@ -404,7 +455,8 @@ class DossierReceptionController extends Controller
                 : 'Ce véhicule n\'est pas éligible à la garantie.',
         ]);
 
-        $dossier->update(['type_panne' => $data['type_panne'], 'statut' => 'diagnostic']);
+        // Devis déjà repris (devis libre préparé avant l'arrivée) : le dossier reste « devis en cours »
+        $dossier->update(['type_panne' => $data['type_panne'], 'statut' => $dossier->devis()->exists() ? 'devis_en_cours' : 'diagnostic']);
         Activite::journaliser('diagnostiquer_dossier', "Diagnostic du dossier {$dossier->numero} : {$data['type_panne']}", $dossier);
 
         if ($data['type_panne'] === 'garantie') {
@@ -470,19 +522,20 @@ class DossierReceptionController extends Controller
         $prixMainOeuvre = $tarifCle ? \App\Services\ReservationService::tarif($tarifCle) : 0;
 
         $piecesARemplacer = ($palier !== null && $typeMoteurId)
-            ? EntretienTache::where('type_moteur_id', $typeMoteurId)
-                ->where('km_seuil', $palier)
-                ->where('action', 'remplacer')
-                ->orderBy('designation')
-                ->get()
+            ? EntretienService::piecesDuPalier($typeMoteurId, $palier)
             : collect();
 
-        if ((float) $prixMainOeuvre === 0.0 && $piecesARemplacer->isEmpty()) {
+        // Opérations du barème facturées en main-d'œuvre (ex : permutation des pneus)
+        $operations = ($palier !== null && $typeMoteurId)
+            ? EntretienService::mainOeuvreDuPalier($typeMoteurId, $palier)
+            : [];
+
+        if ((float) $prixMainOeuvre === 0.0 && $piecesARemplacer->isEmpty() && empty($operations)) {
             $dossier->creerOrDepuisDossier(serviceGratuit: true);
             return;
         }
 
-        $devis = DB::transaction(function () use ($dossier, $designation, $prixMainOeuvre, $piecesARemplacer) {
+        $devis = DB::transaction(function () use ($dossier, $designation, $prixMainOeuvre, $piecesARemplacer, $operations) {
             $devis = Devis::create([
                 'numero'     => Devis::genererNumero(),
                 'dossier_id' => $dossier->id,
@@ -499,11 +552,22 @@ class DossierReceptionController extends Controller
                 'total_ht'      => $prixMainOeuvre,
             ]);
 
+            foreach ($operations as $operation) {
+                LigneDevis::create([
+                    'devis_id'      => $devis->id,
+                    'type'          => 'main_oeuvre',
+                    'designation'   => $operation['designation'],
+                    'quantite'      => 1,
+                    'prix_unitaire' => $operation['prix_unitaire'],
+                    'total_ht'      => $operation['prix_unitaire'],
+                ]);
+            }
+
             foreach ($piecesARemplacer as $tache) {
                 LigneDevis::create([
                     'devis_id'      => $devis->id,
                     'type'          => 'piece',
-                    'designation'   => $tache->designation,
+                    'designation'   => EntretienService::libellePiece($tache->designation),
                     'quantite'      => 1,
                     'prix_unitaire' => 0,
                     'total_ht'      => 0,
@@ -519,5 +583,75 @@ class DossierReceptionController extends Controller
         // Envoi immédiat au fournisseur (hors transaction — appel HTTP externe).
         $devis->load('lignes');
         \App\Services\DevisWorkflowService::genererBonCommande($devis);
+    }
+
+    /**
+     * Correction administrateur d'un dossier de réception — même après création
+     * de l'OR (l'OR se corrige alors séparément, cf. OrdreReparationController::corriger()).
+     */
+    public function corriger(DossierReception $dossier)
+    {
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->isAdmin()) {
+            abort(403);
+        }
+
+        $dossier->load(['client', 'vehicule']);
+
+        return view('dossiers-reception.corriger', [
+            'dossier'     => $dossier,
+            'typesMoteur' => \App\Models\TypeMoteur::orderBy('modele')->get(),
+        ]);
+    }
+
+    public function enregistrerCorrection(Request $request, DossierReception $dossier)
+    {
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->isAdmin()) {
+            abort(403);
+        }
+
+        $data = $request->validate([
+            'kilometrage_entree' => ['required', 'integer', 'min:0'],
+            'niveau_carburant'   => ['required', 'in:vide,1/4,1/2,3/4,plein'],
+            'date_entree'        => ['required', 'date'],
+            'heure_entree'       => ['nullable', 'date_format:H:i'],
+            'urgence'            => ['required', 'in:normal,urgent,tres_urgent'],
+            'motif_entree'       => ['nullable', 'string'],
+            'notes_internes'     => ['nullable', 'string'],
+            'type_moteur_id'     => ['nullable', 'exists:types_moteur,id'],
+        ]);
+
+        $vehicule = $dossier->vehicule;
+        if ($request->filled('type_moteur_id') && (int) $request->type_moteur_id !== (int) $vehicule->type_moteur_id) {
+            $vehicule->update(['type_moteur_id' => (int) $request->type_moteur_id]);
+        }
+
+        // Entretien périodique : palier recalculé avec les valeurs corrigées
+        $palier = $dossier->entretien_km_seuil;
+        if ($dossier->canal_service === 'entretien_periodique' && $vehicule->type_moteur_id) {
+            $palier = EntretienService::resoudrePalier($vehicule, (int) $data['kilometrage_entree'], (int) $vehicule->type_moteur_id, \Carbon\Carbon::parse($data['date_entree']), $dossier->or_id);
+        }
+
+        $dossier->update([
+            'kilometrage_entree' => $data['kilometrage_entree'],
+            'niveau_carburant'   => $data['niveau_carburant'],
+            'date_entree'        => $data['date_entree'],
+            'heure_entree'       => $data['heure_entree'] ?? null,
+            'urgence'            => $data['urgence'],
+            'motif_entree'       => $data['motif_entree'] ?? $dossier->motif_entree,
+            'notes_internes'     => $data['notes_internes'] ?? null,
+            'type_moteur_id'     => $vehicule->type_moteur_id,
+            'entretien_km_seuil' => $palier,
+        ]);
+
+        Activite::journaliser('corriger_dossier', "Correction administrateur du dossier {$dossier->numero}", $dossier);
+
+        return redirect()->route('dossiers-reception.show', $dossier)->with('success', 'Dossier corrigé.'
+            . ($dossier->or_id ? ' L\'OR créé à partir de ce dossier n\'est pas modifié : utilisez « Corriger » sur l\'OR si besoin.' : ''));
     }
 }

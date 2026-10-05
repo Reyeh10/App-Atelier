@@ -163,7 +163,7 @@
                     Plafond du compte (FDJ) <span class="text-red-500">*</span>
                 </label>
                 <input type="number" name="plafond_compte" id="plafond_compte"
-                       value="{{ old('plafond_compte', $client?->plafond_compte) }}"
+                       value="{{ old('plafond_compte', $client?->plafond_compte !== null ? (int) round($client->plafond_compte) : null) }}"
                        min="1" step="1" placeholder="Ex : 500000"
                        class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
                 @if($client?->compte_actif)

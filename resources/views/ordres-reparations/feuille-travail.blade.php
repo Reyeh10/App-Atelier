@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Feuille de Travail — {{ $or->numero }}</title>
+    <title>Feuille de Travail — {{ $or->numero }}@if($feuille['total'] > 1) — Feuille {{ $feuille['numero'] }}@endif</title>
     <style>
         @page { size: A4 portrait; margin: 0; }
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -133,19 +133,24 @@
         <div style="text-align:right;">
             <div class="or-number">{{ $or->numero }}</div>
             <div class="or-date">Créé le {{ $or->created_at->format('d/m/Y à H:i') }}</div>
-            @if($or->date_affectation)
-            <div class="or-date">Affecté le {{ $or->date_affectation->format('d/m/Y à H:i') }}</div>
+            @if($feuille['date_affectation'])
+            <div class="or-date">Affecté le {{ $feuille['date_affectation']->format('d/m/Y à H:i') }}</div>
             @endif
         </div>
     </div>
 
-    <div class="doc-title">Feuille de Travail Mécanicien</div>
+    <div class="doc-title">
+        Feuille de Travail Mécanicien
+        @if($feuille['total'] > 1)
+        — Feuille {{ $feuille['numero'] }} sur {{ $feuille['total'] }}@if($feuille['complementaire']) (devis complémentaire)@endif
+        @endif
+    </div>
 
     {{-- ── Infos OR ── --}}
     <div class="g4" style="margin-bottom:4px;">
         <div class="ib hi">
             <label>Service</label>
-            <span class="badge">{{ $or->getServiceLabel() }}</span>
+            <span class="badge">{{ $feuille['service_label'] }}</span>
         </div>
         <div class="ib">
             <label>Date d'entrée</label>
@@ -194,7 +199,9 @@
     </div>
 
     @php
-        $tousLesDevis = $or->allDevis;
+        // Uniquement le(s) devis de CETTE feuille (feuille 1 = premier devis
+        // accepté ; feuilles suivantes = un devis complémentaire chacune).
+        $tousLesDevis = $feuille['devis'];
         $toutesLignes = $tousLesDevis->flatMap(fn($d) => $d->lignes);
         $lignesMO     = $toutesLignes->where('type', 'main_oeuvre')->values();
         $lignesPce    = $toutesLignes->where('type', 'piece')->values();
@@ -228,7 +235,7 @@
                 <td class="num">{{ $i + 1 }}</td>
                 <td style="font-weight:600;">{{ $l->designation }}</td>
                 <td class="tc" style="font-family:'Courier New',monospace;font-weight:700;color:#1d4ed8;">
-                    {{ number_format($l->quantite,1,'h','') }}h
+                    {{ $or->formatDuree((float) $l->quantite) }}
                 </td>
                 <td class="cb">☐</td>
             </tr>
@@ -272,7 +279,7 @@
                 <td class="num">{{ $i + 1 }}</td>
                 <td style="font-weight:600;">{{ $l->designation }}</td>
                 <td class="ref">{{ $l->reference ?: '—' }}</td>
-                <td class="tc" style="font-weight:700;">{{ (int) $l->quantite }}</td>
+                <td class="tc" style="font-weight:700;">{{ rtrim(rtrim(number_format($l->quantite, 2, ',', ' '), '0'), ',') }}</td>
                 <td class="cb">☐</td>
             </tr>
             @endforeach
@@ -286,6 +293,14 @@
         $controles  = $tachesEntretien?->get('inspecter', collect()) ?? collect();
         $nettoyages = $tachesEntretien?->get('nettoyer', collect()) ?? collect();
     @endphp
+    {{-- Entretien sans barème appliqué : on le signale au lieu d'imprimer une feuille sans contrôles --}}
+    @if($or->type === 'entretien' && ! $feuille['complementaire'] && ($tachesEntretien === null || $tachesEntretien->isEmpty()))
+    <div style="border:1.5px solid #c00;color:#c00;padding:5px 8px;margin:6px 0;font-size:8.5pt;font-weight:700;">
+        ⚠ Barème d'entretien non appliqué :
+        {{ ! $or->vehicule->type_moteur_id ? 'type de moteur du véhicule non renseigné' : (! $or->entretien_km_seuil ? 'aucun palier trouvé pour ce kilométrage' : 'aucun point de contrôle à ce palier') }}.
+        Les contrôles constructeur ne sont pas listés — renseigner le type de moteur (« Corriger » sur l'OR) puis réimprimer.
+    </div>
+    @endif
     @if($controles->isNotEmpty() || $nettoyages->isNotEmpty())
     <div class="two-col">
 
@@ -375,19 +390,21 @@
              n'a pas encore été enregistrée. --}}
         <div class="c-box">
             <label>Heure de début</label>
-            @if($or->heure_debut_travaux)<div class="c-value">{{ $or->heure_debut_travaux->format('H:i') }}</div>@else<div class="c-line"></div>@endif
+            @if($feuille['heure_debut'])<div class="c-value">{{ $feuille['heure_debut']->format('H:i') }}</div>@else<div class="c-line"></div>@endif
         </div>
         <div class="c-box">
             <label>Heure de fin</label>
-            @if($or->heure_fin_travaux)<div class="c-value">{{ $or->heure_fin_travaux->format('H:i') }}</div>@else<div class="c-line"></div>@endif
+            @if($feuille['heure_fin'])<div class="c-value">{{ $feuille['heure_fin']->format('H:i') }}</div>@else<div class="c-line"></div>@endif
         </div>
         <div class="c-box">
             <label>Durée réelle (H)</label>
-            @if($or->getDureeReelleHeures() !== null)<div class="c-value">{{ $or->formatDuree($or->getDureeReelleHeures()) }}</div>@else<div class="c-line"></div>@endif
+            @if($feuille['duree_reelle'] !== null)<div class="c-value">{{ $or->formatDuree($feuille['duree_reelle']) }}</div>@else<div class="c-line"></div>@endif
         </div>
         <div class="c-box">
             <label>Durée standard (H)</label>
-            @if($or->duree_estimee !== null)<div class="c-value">{{ $or->formatDuree($or->duree_estimee) }}</div>@else<div class="c-line"></div>@endif
+            {{-- Durée estimée saisie à l'affectation, sinon total des heures de main-d'œuvre de la feuille --}}
+            @php $dureeStandard = $feuille['duree_estimee'] ?? ($lignesMO->sum('quantite') > 0 ? (float) $lignesMO->sum('quantite') : null); @endphp
+            @if($dureeStandard !== null)<div class="c-value">{{ $or->formatDuree($dureeStandard) }}</div>@else<div class="c-line"></div>@endif
         </div>
     </div>
 
@@ -402,13 +419,13 @@
     <div class="sig-grid">
         <div class="sig-box">
             <label>Technicien assigné</label>
-            <div class="sig-name">{{ $or->technicien?->name ?? '—' }}</div>
+            <div class="sig-name">{{ $feuille['technicien'] ?? '—' }}</div>
             <div class="sig-line"></div>
             <div class="sig-hint">Signature</div>
         </div>
         <div class="sig-box">
             <label>Chef atelier</label>
-            <div class="sig-name">{{ $or->chef?->name ?? '—' }}</div>
+            <div class="sig-name">{{ $feuille['chef'] ?? '—' }}</div>
             <div class="sig-line"></div>
             <div class="sig-hint">Visa</div>
         </div>
@@ -421,7 +438,7 @@
     </div>
 
     <div class="footer">
-        <span>STCD Motors — Feuille de Travail {{ $or->numero }}</span>
+        <span>STCD Motors — Feuille de Travail {{ $or->numero }}@if($feuille['total'] > 1) — Feuille {{ $feuille['numero'] }}/{{ $feuille['total'] }}@endif</span>
         <span>Imprimé le {{ now()->format('d/m/Y à H:i') }}</span>
     </div>
 
