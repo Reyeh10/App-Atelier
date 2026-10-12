@@ -42,15 +42,25 @@ class ArrondiFdjService
         }
 
         $ordre = array_keys($lignes);
-        // Lignes à quantité 1 sans remise d'abord (le prix reste un prix « rond » par
-        // unité, ex : une pièce), puis de la plus chère à la moins chère
-        $simple = fn ($l) => (float) $l['quantite'] == 1.0 && (float) ($l['remise'] ?? 0) == 0.0;
-        usort($ordre, fn ($a, $b) => [$simple($lignes[$b]), $lignes[$b]['total_ht']] <=> [$simple($lignes[$a]), $lignes[$a]['total_ht']]);
+        // Ordre des lignes à ajuster :
+        // 1. la main-d'œuvre (et autres lignes) avant les pièces : une pièce garde le prix
+        //    du magasin, et le total des pièces du devis reste celui du BC et du BT ;
+        // 2. un prix saisi à la main (devis sans réception) n'est retouché qu'en dernier recours ;
+        // 3. puis les lignes à quantité 1 sans remise (prix « rond » par unité), puis la plus chère
+        $libre    = fn ($l) => empty($l['prix_manuel']);
+        $horsPiece = fn ($l) => ($l['type'] ?? null) !== 'piece';
+        $simple   = fn ($l) => (float) $l['quantite'] == 1.0 && (float) ($l['remise'] ?? 0) == 0.0;
+        $cle      = fn ($l) => [$libre($l), $horsPiece($l), $simple($l), $l['total_ht']];
+        usort($ordre, fn ($a, $b) => $cle($lignes[$b]) <=> $cle($lignes[$a]));
 
         // Le plus petit ajustement d'abord (1 franc, puis 2...), sur la ligne la
         // plus chère qui le permet
         for ($pas = 1; $pas <= 100; $pas++) {
             foreach ($ordre as $index) {
+                // Une ligne à 0 (pièce en attente du prix du magasin, geste offert) n'est jamais ajustée
+                if ((float) $lignes[$index]['prix_unitaire'] <= 0) {
+                    continue;
+                }
                 $diviseur = (float) $lignes[$index]['quantite'] * (1 - (float) ($lignes[$index]['remise'] ?? 0) / 100);
                 if ($diviseur <= 0) {
                     continue;

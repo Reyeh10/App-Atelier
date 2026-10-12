@@ -58,7 +58,9 @@ class Client extends Model
      */
     public function getSoldeCompteAttribute(): float
     {
-        return (float) $this->factures()->where('statut', 'emise')->where('credit_accorde', true)->sum('montant_ttc');
+        return (float) Facture::where(fn ($q) => $q->where(fn ($p) => $p->where('client_id', $this->id)->whereNull('assurance_id'))
+                ->orWhere('assurance_id', $this->id))
+            ->where('statut', 'emise')->where('credit_accorde', true)->sum('montant_ttc');
     }
 
     /**

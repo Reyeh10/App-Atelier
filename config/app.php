@@ -121,4 +121,14 @@ return [
 
     'facture_numero_depart' => (int) env('FACTURE_NUMERO_DEPART', 0),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Version de l'application
+    |--------------------------------------------------------------------------
+    | Affichée en bas du menu. À augmenter à chaque nouvel envoi (version 3 =
+    | envoi du 30/09/2026, déployé le 05/10/2026).
+    */
+
+    'version' => '4',
+
 ];

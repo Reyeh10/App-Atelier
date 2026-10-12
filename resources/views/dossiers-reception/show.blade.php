@@ -122,6 +122,15 @@
 </div>
 @endif
 
+{{-- Accident : qui paie (modifiable tant que l'OR n'existe pas — ensuite depuis l'OR) --}}
+@if($dossier->motif_visite === 'accident')
+@include('partials.payeur-assurance', [
+    'modele'     => $dossier,
+    'action'     => route('dossiers-reception.payeur', $dossier),
+    'modifiable' => ! $dossier->or_id,
+])
+@endif
+
 {{-- Infos réception --}}
 <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
     <div class="px-6 py-3 bg-gray-50 border-b border-gray-200">

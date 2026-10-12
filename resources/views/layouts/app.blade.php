@@ -5,6 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>@yield('title', 'Tableau de bord') — App Atelier</title>
+    {{-- Application installable (iPad / iPhone : notifications après ajout à l'écran d'accueil) --}}
+    <link rel="manifest" href="{{ route('manifeste') }}">
+    <link rel="apple-touch-icon" href="{{ asset('icone-192.png') }}">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Atelier STCD">
+    <meta name="theme-color" content="#0f172a">
     {{-- Appliqué AVANT le rendu pour éviter le flash --}}
     <script>
         (function() {
@@ -76,9 +83,6 @@
                         ->whereHas('lignes')
                         ->whereDoesntHave('lignes', fn($q) => $q->where('disponible', false)->orWhereNull('disponible'))
                         ->count()
-                    : 0;
-                $nbLivraisonsFlotteAFacturer = $u->hasPermission('creer_factures')
-                    ? \App\Models\LivraisonFlotte::aFacturer()->count()
                     : 0;
                 $nbDossiersDiagnostic  = $u->hasPermission('voir_dossiers')
                     ? \App\Models\DossierReception::whereIn('statut', ['nouveau', 'diagnostic'])->count()
@@ -334,28 +338,78 @@
             </x-nav-link>
             @endif
 
-            {{-- Flotte : pièces livrées aux sociétés qui ont leur propre atelier (ni réception, ni OR) --}}
-            @if($u->hasPermission('voir_factures'))
-            <div class="pt-3 pb-1">
-                <p class="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Flotte</p>
+            {{-- Listes sans facture au passage : parc leasing, véhicules de service (administrateur),
+                 bus leasing et bus transport public (gestion des BC) --}}
+            @if($u->isAdmin())
+            <x-nav-link href="{{ route('leasing.index') }}" :active="request()->routeIs('leasing.index')">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16"/>
+                </svg>
+                Parc leasing
+            </x-nav-link>
+            <x-nav-link href="{{ route('vehicules-service.index') }}" :active="request()->routeIs('vehicules-service.index')">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                </svg>
+                Véhicules de service
+            </x-nav-link>
+            @endif
+            @if($u->isAdmin() || $u->peutGererBonsCommande())
+            <x-nav-link href="{{ route('leasing-bus.index') }}" :active="request()->routeIs('leasing-bus.index') || request()->routeIs('leasing-bus.bc.*') || request()->routeIs('leasing-bus.parc.*')">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M8 7h8m-8 4h8m-6 8H6a2 2 0 01-2-2V5a2 2 0 012-2h12a2 2 0 012 2v12a2 2 0 01-2 2h-4m-4 0v2m4-2v2"/>
+                </svg>
+                Bus leasing
+            </x-nav-link>
+            <x-nav-link href="{{ route('bus-transport.index') }}" :active="request()->routeIs('bus-transport.index') || request()->routeIs('bus-transport.bc.*') || request()->routeIs('bus-transport.parc.*')">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M8 7h8m-8 4h8m-6 8H6a2 2 0 01-2-2V5a2 2 0 012-2h12a2 2 0 012 2v12a2 2 0 01-2 2h-4m-4 0v2m4-2v2"/>
+                </svg>
+                Bus transport public
+            </x-nav-link>
+            @endif
+
+            {{-- Récaps (sans facture) : un seul menu, un sous-menu par récap — caissière et administrateur --}}
+            @if($u->isAdmin() || $u->hasPermission('encaisser_factures'))
+            @php
+                // Page d'un récap enregistré : le sous-menu de son type reste allumé
+                $recapOuvert = request()->route('recap');
+                $typeRecap = $recapOuvert instanceof \App\Models\RecapLeasing ? $recapOuvert->type : null;
+                $sousMenusRecaps = [
+                    ['route' => 'leasing.recaps',           'type' => 'stcd',      'libelle' => 'Récaps leasing'],
+                    ['route' => 'leasing-tiers.recaps',     'type' => 'tiers',     'libelle' => 'Récaps leasing tiers'],
+                    ['route' => 'vehicules-service.recaps', 'type' => 'service',   'libelle' => 'Récaps véhicules de service'],
+                    ['route' => 'leasing-bus.recaps',       'type' => 'bus',       'libelle' => 'Récaps bus leasing'],
+                    ['route' => 'bus-transport.recaps',     'type' => 'transport', 'libelle' => 'Récaps bus transport public'],
+                ];
+                $recapsActive = $typeRecap !== null || collect($sousMenusRecaps)->contains(fn ($m) => request()->routeIs($m['route']));
+            @endphp
+            <div>
+                <button onclick="toggleRecapsMenu()"
+                        class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors
+                               {{ $recapsActive ? 'bg-orange-500 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white' }}">
+                    <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                    </svg>
+                    <span class="flex-1 text-left">Récaps</span>
+                    <svg id="recaps-chevron" class="w-4 h-4 flex-shrink-0 transition-transform duration-200 {{ $recapsActive ? 'rotate-180' : '' }}"
+                         fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
+                    </svg>
+                </button>
+
+                <div id="recaps-submenu" class="{{ $recapsActive ? '' : 'hidden' }} mt-1 ml-4 pl-3 border-l border-slate-700 space-y-0.5">
+                    @foreach($sousMenusRecaps as $m)
+                    @php $actif = request()->routeIs($m['route']) || $typeRecap === $m['type']; @endphp
+                    <a href="{{ route($m['route']) }}"
+                       class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors
+                              {{ $actif ? 'text-white bg-slate-700' : 'text-slate-400 hover:bg-slate-800 hover:text-white' }}">
+                        <span class="w-1.5 h-1.5 rounded-full {{ $actif ? 'bg-orange-400' : 'bg-slate-500' }} flex-shrink-0"></span>
+                        {{ $m['libelle'] }}
+                    </a>
+                    @endforeach
+                </div>
             </div>
-
-            <x-nav-link href="{{ route('flotte.index') }}" :active="request()->routeIs('flotte.index') || request()->routeIs('flotte.show') || request()->routeIs('flotte.facturer*') || request()->routeIs('flotte.importer*')">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M8 7h8m-8 4h8m-9 8h10a2 2 0 002-2V7a4 4 0 00-4-4H9a4 4 0 00-4 4v10a2 2 0 002 2zm0 0v2m10-2v2M7 15h.01M17 15h.01"/>
-                </svg>
-                <span class="flex-1">Livraisons flotte</span>
-                @if($nbLivraisonsFlotteAFacturer > 0)
-                <span class="inline-flex items-center justify-center bg-green-500 text-white text-[11px] font-bold min-w-[19px] h-[19px] px-1 rounded-full flex-shrink-0">{{ $nbLivraisonsFlotteAFacturer > 99 ? '99+' : $nbLivraisonsFlotteAFacturer }}</span>
-                @endif
-            </x-nav-link>
-
-            <x-nav-link href="{{ route('flotte.rapport') }}" :active="request()->routeIs('flotte.rapport')">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-                </svg>
-                Pièces par bus
-            </x-nav-link>
             @endif
 
             @if($u->isAdmin())
@@ -424,6 +478,9 @@
                     </button>
                 </form>
             </div>
+
+            {{-- Version de l'application (config/app.php → version) --}}
+            <p class="text-center text-slate-500 text-xs mt-2">Version {{ config('app.version') }}</p>
         </div>
 
     </aside>
@@ -456,7 +513,8 @@
                         ->latest()
                         ->limit(10)
                         ->get();
-                    $nbNonLues = $mesNotifications->whereNull('lu_at')->count();
+                    $nbNonLues = auth()->user()->notificationsNonLues();
+                    $dernierIdNotif = (int) ($mesNotifications->max('id') ?? 0);
                 @endphp
                 <div class="relative">
                     <button onclick="toggleNotifications()" id="notif-bell-btn"
@@ -464,11 +522,9 @@
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
                         </svg>
-                        @if($nbNonLues > 0)
-                        <span class="absolute -top-0.5 -right-0.5 bg-red-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
+                        <span id="notif-badge" class="{{ $nbNonLues > 0 ? '' : 'hidden' }} absolute -top-0.5 -right-0.5 bg-red-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
                             {{ $nbNonLues > 9 ? '9+' : $nbNonLues }}
                         </span>
-                        @endif
                     </button>
 
                     <div id="notif-dropdown" class="hidden absolute right-0 mt-2 w-80 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl shadow-lg z-50 overflow-hidden">
@@ -481,7 +537,7 @@
                             </form>
                             @endif
                         </div>
-                        <div class="max-h-80 overflow-y-auto divide-y divide-gray-100 dark:divide-slate-700">
+                        <div id="notif-liste" class="max-h-80 overflow-y-auto divide-y divide-gray-100 dark:divide-slate-700">
                             @forelse($mesNotifications as $notif)
                             <a href="{{ route('notifications.ouvrir', $notif) }}"
                                class="block px-4 py-3 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors {{ $notif->lu_at ? '' : 'bg-orange-50 dark:bg-slate-700/50' }}">
@@ -490,8 +546,17 @@
                                 <p class="text-[11px] text-slate-400 mt-1">{{ $notif->created_at->diffForHumans() }}</p>
                             </a>
                             @empty
-                            <p class="px-4 py-6 text-sm text-slate-400 text-center">Aucune notification</p>
+                            <p id="notif-vide" class="px-4 py-6 text-sm text-slate-400 text-center">Aucune notification</p>
                             @endforelse
+                        </div>
+                        {{-- Réglages de cet appareil : notifications push (sonnerie de l'appareil) et son dans la page --}}
+                        <div class="px-4 py-3 border-t border-gray-100 dark:border-slate-700 bg-gray-50 dark:bg-slate-900 space-y-2">
+                            <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Sur cet appareil</p>
+                            <button type="button" id="notif-push-btn" onclick="notifBasculerPush()"
+                                    class="w-full text-left text-xs font-medium text-orange-500 hover:text-orange-600">🔔 Activer les notifications (même système fermé)</button>
+                            <p id="notif-push-etat" class="hidden text-[11px] text-slate-500"></p>
+                            <button type="button" id="notif-son-btn" onclick="notifBasculerSon()"
+                                    class="w-full text-left text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-slate-800">🔊 Son dans la page : activé</button>
                         </div>
                     </div>
                 </div>
@@ -511,6 +576,207 @@
                     dropdown.classList.add('hidden');
                 }
             });
+
+            // ── Notifications en direct, avec son ─────────────────────────────
+            // Toutes les 20 s : nouvelles notifications → son + fenêtre en bas à droite
+            // + cloche à jour. Si cet appareil est abonné aux notifications push, c'est
+            // l'appareil qui sonne (sa propre sonnerie) : la page ne joue pas de son en plus.
+            (function () {
+                const CFG = {
+                    nouvelles: @json(route('notifications.nouvelles')),
+                    abonner: @json(route('notifications.push.abonner')),
+                    desabonner: @json(route('notifications.push.desabonner')),
+                    sw: @json(asset('sw-notifications.js')),
+                    cle: @json(config('services.webpush.public_key')),
+                    dernier: {{ $dernierIdNotif }},
+                    user: {{ auth()->id() }},
+                };
+                const csrf = document.querySelector('meta[name="csrf-token"]').content;
+                const cleDernier = 'notif-dernier-' + CFG.user;
+                let pushActif = false;
+
+                const lire = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+                const ecrire = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+                const sonActive = () => lire('notif-son') !== 'off';
+
+                // Son « ding » généré (aucun fichier) — les navigateurs l'autorisent après un premier clic
+                let audio = null;
+                const debloquerSon = () => {
+                    try {
+                        audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+                        if (audio.state === 'suspended') audio.resume();
+                    } catch (e) {}
+                };
+                document.addEventListener('pointerdown', debloquerSon, { once: true });
+                document.addEventListener('keydown', debloquerSon, { once: true });
+                function jouerSon() {
+                    if (!audio) return;
+                    [[880, 0], [1320, 0.16]].forEach(function ([freq, decal]) {
+                        const o = audio.createOscillator(), g = audio.createGain(), t = audio.currentTime + decal;
+                        o.type = 'sine'; o.frequency.value = freq;
+                        g.gain.setValueAtTime(0.0001, t);
+                        g.gain.exponentialRampToValueAtTime(0.35, t + 0.02);
+                        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
+                        o.connect(g).connect(audio.destination);
+                        o.start(t); o.stop(t + 0.5);
+                    });
+                }
+
+                const echapper = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+                // Fenêtre en bas à droite, quelques secondes ; un clic ouvre la page concernée
+                function afficherFenetre(n) {
+                    let zone = document.getElementById('notif-fenetres');
+                    if (!zone) {
+                        zone = document.createElement('div');
+                        zone.id = 'notif-fenetres';
+                        zone.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:60;display:flex;flex-direction:column;gap:8px;max-width:340px;width:calc(100% - 32px)';
+                        document.body.appendChild(zone);
+                    }
+                    const a = document.createElement('a');
+                    a.href = n.url;
+                    a.style.cssText = 'display:block;background:#fff;border:1px solid #fed7aa;border-left:4px solid #f97316;border-radius:12px;padding:10px 14px;box-shadow:0 8px 24px rgba(0,0,0,.15);text-decoration:none;transition:opacity .3s';
+                    a.innerHTML = '<p style="font-size:13px;font-weight:700;color:#1e293b;margin:0">🔔 ' + echapper(n.titre) + '</p>'
+                        + '<p style="font-size:12px;color:#64748b;margin:2px 0 0">' + echapper(n.corps) + '</p>';
+                    zone.appendChild(a);
+                    setTimeout(() => { a.style.opacity = '0'; setTimeout(() => a.remove(), 300); }, 8000);
+                }
+
+                function ajouterALaListe(n) {
+                    const liste = document.getElementById('notif-liste');
+                    if (!liste) return;
+                    document.getElementById('notif-vide')?.remove();
+                    const a = document.createElement('a');
+                    a.href = n.url;
+                    a.className = 'block px-4 py-3 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors bg-orange-50 dark:bg-slate-700/50';
+                    a.innerHTML = '<p class="text-sm font-medium text-slate-800 dark:text-slate-100">' + echapper(n.titre) + '</p>'
+                        + '<p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2">' + echapper(n.corps) + '</p>'
+                        + '<p class="text-[11px] text-slate-400 mt-1">à l\'instant</p>';
+                    liste.prepend(a);
+                }
+
+                function majBadge(nb) {
+                    const b = document.getElementById('notif-badge');
+                    if (!b) return;
+                    b.textContent = nb > 9 ? '9+' : nb;
+                    b.classList.toggle('hidden', nb <= 0);
+                }
+
+                async function interroger() {
+                    // Plusieurs onglets ouverts : chaque notification ne sonne qu'une fois
+                    const depuis = Math.max(parseInt(lire(cleDernier) || '0', 10), CFG.dernier);
+                    try {
+                        const r = await fetch(CFG.nouvelles + '?depuis=' + depuis, { headers: { 'Accept': 'application/json' } });
+                        if (!r.ok) return;
+                        const d = await r.json();
+                        majBadge(d.non_lues);
+                        const dejaVu = parseInt(lire(cleDernier) || '0', 10);
+                        const neuves = d.nouvelles.filter((n) => n.id > dejaVu);
+                        CFG.dernier = Math.max(CFG.dernier, d.dernier_id);
+                        ecrire(cleDernier, Math.max(dejaVu, d.dernier_id));
+                        neuves.forEach((n) => { afficherFenetre(n); ajouterALaListe(n); });
+                        if (neuves.length && sonActive() && !pushActif) jouerSon();
+                    } catch (e) {}
+                }
+                if (lire(cleDernier) === null) ecrire(cleDernier, CFG.dernier);
+                setTimeout(interroger, 3000);
+                setInterval(interroger, 20000);
+
+                // ── Son dans la page ──
+                function majBoutonSon() {
+                    const b = document.getElementById('notif-son-btn');
+                    if (b) b.textContent = sonActive() ? '🔊 Son dans la page : activé' : '🔇 Son dans la page : coupé';
+                }
+                window.notifBasculerSon = function () {
+                    ecrire('notif-son', sonActive() ? 'off' : 'on');
+                    majBoutonSon();
+                    if (sonActive()) { debloquerSon(); jouerSon(); }
+                };
+                majBoutonSon();
+
+                // ── Notifications push (sonnerie de l'appareil, même système fermé) ──
+                const pushPossible = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+                const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+                function majBoutonPush(etat) {
+                    const b = document.getElementById('notif-push-btn'), p = document.getElementById('notif-push-etat');
+                    if (!b) return;
+                    if (!CFG.cle) { b.classList.add('hidden'); return; }
+                    b.textContent = pushActif ? '🔕 Désactiver les notifications de cet appareil' : '🔔 Activer les notifications (même système fermé)';
+                    p.textContent = etat || (pushActif ? '✓ Activées : cet appareil sonne avec sa propre sonnerie.' : '');
+                    p.classList.toggle('hidden', !p.textContent);
+                }
+
+                async function abonnementActuel() {
+                    if (!pushPossible || !CFG.cle) return null;
+                    const reg = await navigator.serviceWorker.getRegistration(CFG.sw);
+                    return reg ? reg.pushManager.getSubscription() : null;
+                }
+
+                async function envoyer(url, corps) {
+                    const r = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrf },
+                        body: JSON.stringify(corps),
+                    });
+                    if (!r.ok) throw new Error('Enregistrement refusé (' + r.status + ')');
+                }
+
+                function cleVersOctets(base64) {
+                    const pad = '='.repeat((4 - base64.length % 4) % 4);
+                    const brut = atob((base64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+                    return Uint8Array.from(brut, (c) => c.charCodeAt(0));
+                }
+
+                function attendreActif(reg) {
+                    if (reg.active) return Promise.resolve(reg);
+                    return new Promise((ok) => {
+                        const sw = reg.installing || reg.waiting;
+                        sw.addEventListener('statechange', () => { if (sw.state === 'activated') ok(reg); });
+                    });
+                }
+
+                window.notifBasculerPush = async function () {
+                    if (!pushPossible) {
+                        alert(ios
+                            ? "Sur iPad / iPhone : ajoutez d'abord le site à l'écran d'accueil (bouton Partager → « Sur l'écran d'accueil »), ouvrez-le depuis cette icône, puis activez les notifications."
+                            : "Ce navigateur ne gère pas les notifications. Utilisez Chrome, Edge ou Firefox.");
+                        return;
+                    }
+                    try {
+                        const actuel = await abonnementActuel();
+                        if (actuel && pushActif) {
+                            await envoyer(CFG.desabonner, { endpoint: actuel.endpoint });
+                            await actuel.unsubscribe();
+                            pushActif = false;
+                            majBoutonPush('Notifications désactivées sur cet appareil.');
+                            return;
+                        }
+                        const permission = await Notification.requestPermission();
+                        if (permission !== 'granted') {
+                            majBoutonPush("Notifications refusées : autorisez-les dans les réglages du navigateur pour ce site.");
+                            return;
+                        }
+                        majBoutonPush('Activation…');
+                        const reg = await attendreActif(await navigator.serviceWorker.register(CFG.sw));
+                        const abo = actuel || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: cleVersOctets(CFG.cle) });
+                        await envoyer(CFG.abonner, abo.toJSON());
+                        pushActif = true;
+                        majBoutonPush('✓ Activées — une notification de test arrive.');
+                    } catch (e) {
+                        majBoutonPush("Activation impossible : " + e.message);
+                    }
+                };
+
+                // Au chargement : l'appareil déjà abonné est rattaché à l'utilisateur connecté
+                abonnementActuel().then(async (abo) => {
+                    if (abo && Notification.permission === 'granted') {
+                        pushActif = true;
+                        try { await envoyer(CFG.abonner, Object.assign(abo.toJSON(), { silencieux: true })); } catch (e) {}
+                    }
+                    majBoutonPush();
+                }).catch(() => majBoutonPush());
+            })();
         </script>
 
         {{-- Flash messages --}}
@@ -559,6 +825,14 @@ function toggleSidebar() {
 function toggleOrMenu() {
     var submenu = document.getElementById('or-submenu');
     var chevron = document.getElementById('or-chevron');
+    if (!submenu) return;
+    var isHidden = submenu.classList.toggle('hidden');
+    chevron.classList.toggle('rotate-180', !isHidden);
+}
+
+function toggleRecapsMenu() {
+    var submenu = document.getElementById('recaps-submenu');
+    var chevron = document.getElementById('recaps-chevron');
     if (!submenu) return;
     var isHidden = submenu.classList.toggle('hidden');
     chevron.classList.toggle('rotate-180', !isHidden);

@@ -22,7 +22,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Facture extends Model
 {
     protected $fillable = [
-        'numero', 'or_id', 'devis_id', 'client_id', 'vehicule_id', 'livraison_flotte_id', 'marque_garantie_id', 'encaissement_global_id',
+        'numero', 'or_id', 'devis_id', 'client_id', 'assurance_id', 'vehicule_id', 'livraison_flotte_id', 'marque_garantie_id', 'encaissement_global_id',
         'statut', 'mode_paiement',
         'numero_bon_commande_client', 'bon_commande_client_chemin', 'bon_commande_client_nom_original',
         'date_emission', 'date_echeance', 'date_paiement', 'notes', 'frais_timbre',
@@ -101,12 +101,30 @@ class Facture extends Model
         return $this->belongsTo(MarqueGarantie::class);
     }
 
-    /** Nom de l'entité qui paie réellement cette facture (marque garantie, sinon le client) */
+    /** Assurance qui paie la facture (accident) — le client reste le propriétaire du véhicule */
+    public function assurance(): BelongsTo
+    {
+        return $this->belongsTo(Client::class, 'assurance_id');
+    }
+
+    /** Compte qui doit cette facture : l'assurance si elle paie, sinon le client */
+    public function compteDebiteur(): Client
+    {
+        return $this->assurance ?? $this->client;
+    }
+
+    /** Nom de l'entité qui paie réellement cette facture (marque garantie, assurance, sinon le client) */
     public function getPayeurNomAttribute(): string
     {
-        return $this->marque_garantie_id
-            ? $this->marqueGarantie->nom . ' (garantie constructeur)'
-            : $this->client->nom_complet;
+        if ($this->marque_garantie_id) {
+            return $this->marqueGarantie->nom . ' (garantie constructeur)';
+        }
+        if ($this->assurance_id && $this->assurance) {
+            $sinistre = $this->ordreReparation?->numero_sinistre;
+            return $this->assurance->nom_complet . ' (assurance' . ($sinistre ? " — sinistre n° {$sinistre}" : '') . ')';
+        }
+
+        return $this->client->nom_complet;
     }
 
     /** Lignes de détail de la facture (pièces + main d'œuvre) */
@@ -214,8 +232,13 @@ class Facture extends Model
      */
     public function montantEnLettres(): string
     {
-        $total = (int) round($this->totalGeneral());
-        return ucfirst(self::nombreEnLettres($total)) . ' Francs Djiboutiens';
+        return self::sommeEnLettres($this->totalGeneral());
+    }
+
+    /** Une somme en toutes lettres (« Treize mille cinq cent soixante-deux Francs Djiboutiens ») — aussi pour les récaps leasing */
+    public static function sommeEnLettres(float $montant): string
+    {
+        return ucfirst(self::nombreEnLettres((int) round($montant))) . ' Francs Djiboutiens';
     }
 
     /**
@@ -295,6 +318,47 @@ class Facture extends Model
             'annulee'   => 'red',
             default     => 'gray',
         };
+    }
+
+    /**
+     * Versements reçus (pour l'impression) : chaque paiement est noté dans le journal
+     * d'activité (« Versement de 10 000 FDJ (Waafi) sur facture… »). Facture soldée
+     * par un encaissement global, ou ancien paiement non journalisé : un seul versement.
+     *
+     * @return \Illuminate\Support\Collection<int, array{date: \Carbon\Carbon|null, montant: float, mode: string}>
+     */
+    public function versements(): \Illuminate\Support\Collection
+    {
+        $versements = Activite::where('action', 'payer_facture')
+            ->where('subject_type', 'Facture')->where('subject_id', $this->id)
+            ->orderBy('id')->get()
+            ->map(function (Activite $a) {
+                if (! preg_match('/Versement de ([\d\s\x{202F}\x{00A0}]+) FDJ \(([^)]+)\)/u', $a->description, $m)) {
+                    return null;
+                }
+                return ['date' => $a->created_at, 'montant' => (float) preg_replace('/\D/', '', $m[1]), 'mode' => $m[2]];
+            })
+            ->filter()->values();
+
+        // Le mode de la facture est celui du dernier versement : une correction de
+        // l'administrateur (mode modifié dans la liste) s'applique donc à celui-ci
+        if ($versements->isNotEmpty() && $this->mode_paiement) {
+            $dernier = $versements->pop();
+            $versements->push(array_merge($dernier, ['mode' => $this->getModePaiementLabel()]));
+        }
+
+        if ($versements->isEmpty() && (float) $this->montant_paye > 0) {
+            $eg = $this->encaissementGlobal;
+            $versements->push([
+                'date'    => $this->date_paiement,
+                'montant' => (float) $this->montant_paye,
+                'mode'    => $eg && $eg->statut === 'paye'
+                    ? 'Encaissement global ' . $eg->numero . ($eg->mode_paiement ? ' — ' . ucfirst(str_replace('_', ' ', $eg->mode_paiement)) : '')
+                    : $this->getModePaiementLabel(),
+            ]);
+        }
+
+        return $versements;
     }
 
     /** Retourne le libellé du mode de paiement */

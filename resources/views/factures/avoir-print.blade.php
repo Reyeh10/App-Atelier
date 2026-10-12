@@ -18,7 +18,7 @@
         .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px; }
         .company-logo { height: 56px; width: auto; }
         .company-name { font-size: 11pt; font-weight: 900; text-transform: uppercase; color: #111; margin-top: 4px; }
-        .company-sub  { font-size: 7.5pt; color: #faf1f1; font-style: italic; }
+        .company-sub  { font-size: 7.5pt; color: #333; font-style: italic; }
         .company-addr { font-size: 7.5pt; color: #f7f7f7; margin-top: 2px; }
 
         .doc-meta { text-align: right; }
@@ -97,7 +97,7 @@
         <div>
             <img src="{{ asset('logo.jpg') }}" alt="STCD" class="company-logo">
             <div class="company-name">Société de Transport en Commun de Djibouti</div>
-            <div class="company-sub">Le professionnalisme en question</div>
+            <div class="company-sub">Le professionnalisme au quotidien</div>
         </div>
         <div class="doc-meta">
             <div class="doc-city">Djibouti, le {{ $avoir->date_emission->format('d/m/Y') }}</div>
@@ -121,16 +121,17 @@
                 <span class="client-lbl">DOIT :</span>
                 <span class="client-val" style="font-weight:700;">{{ $avoir->payeur_nom }}</span>
             </div>
-            @if(!$avoir->marque_garantie_id && $avoir->client->nif)
+            @php $doit = $avoir->marque_garantie_id ? null : ($avoir->facture?->assurance ?? $avoir->client); @endphp
+            @if($doit?->nif)
             <div class="client-row">
                 <span class="client-lbl">CODE NIF :</span>
-                <span class="client-val">{{ $avoir->client->nif }}</span>
+                <span class="client-val">{{ $doit->nif }}</span>
             </div>
             @endif
-            @if(!$avoir->marque_garantie_id && $avoir->client->rc)
+            @if($doit?->rc)
             <div class="client-row">
                 <span class="client-lbl">RC :</span>
-                <span class="client-val">{{ $avoir->client->rc }}</span>
+                <span class="client-val">{{ $doit->rc }}</span>
             </div>
             @endif
             <div class="client-row">
@@ -156,7 +157,7 @@
             {{-- "Propriétaire" n'est utile que si le payeur (DOIT, ci-contre) diffère du
                  propriétaire du véhicule — cas d'une facture adressée au compte garantie
                  constructeur. Sinon DOIT affiche déjà le même nom, pas besoin de le répéter. --}}
-            @if($avoir->marque_garantie_id)
+            @if($avoir->marque_garantie_id || $avoir->facture?->assurance_id)
             <div class="client-row">
                 <span class="client-lbl">Propriétaire :</span>
                 <span class="client-val">{{ $avoir->client->nom_complet }}</span>

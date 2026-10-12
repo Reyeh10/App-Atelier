@@ -477,7 +477,7 @@
         <div class="chrono-travaux bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-center justify-between gap-3 flex-wrap"
              data-debut="{{ $or->heure_debut_travaux->toIso8601String() }}" data-estimee="{{ $or->duree_estimee ?? '' }}">
             <div>
-                <p class="text-xs text-blue-400">⏱ Temps écoulé depuis le démarrage</p>
+                <p class="text-xs text-blue-400">⏱ Temps de travail écoulé (heures d'ouverture) <span class="hidden font-semibold text-slate-500" data-chrono-pause>— ⏸ en pause (atelier fermé)</span></p>
                 <p class="font-mono font-bold text-lg text-blue-800" data-chrono-ecoule>--:--:--</p>
             </div>
             @if($or->duree_estimee)
@@ -643,7 +643,7 @@
                 <div class="chrono-travaux bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-center justify-between gap-3 flex-wrap"
                      data-debut="{{ $dc->heure_debut_travaux->toIso8601String() }}" data-estimee="{{ $dc->duree_estimee ?? '' }}">
                     <div>
-                        <p class="text-xs text-blue-400">⏱ Temps écoulé depuis le démarrage</p>
+                        <p class="text-xs text-blue-400">⏱ Temps de travail écoulé (heures d'ouverture) <span class="hidden font-semibold text-slate-500" data-chrono-pause>— ⏸ en pause (atelier fermé)</span></p>
                         <p class="font-mono font-bold text-lg text-blue-800" data-chrono-ecoule>--:--:--</p>
                     </div>
                     @if($dc->duree_estimee)
@@ -747,6 +747,28 @@
         </form>
         @endif
     </div>
+    @endif
+
+    {{-- Véhicule du parc leasing : pas de facture, pièces reprises dans le récap --}}
+    @if($or->parc_leasing && $or->payeParTiers())
+    <div class="bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3 text-sm text-indigo-700">
+        <p class="font-semibold">{{ ucfirst($or->libelleParc()) }} — facturé {{ $or->assurance_id ? "à l'assurance" : 'à la marque (garantie)' }}</p>
+        <p class="text-xs mt-0.5">Ce passage est payé par {{ $or->assurance_id ? "l'assurance (accident)" : 'la garantie constructeur' }} : l'OR est facturé normalement et n'entre pas dans le récap leasing.</p>
+    </div>
+    @elseif($or->parc_leasing)
+    <div class="bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3 text-sm text-indigo-700">
+        <p class="font-semibold">{{ ucfirst($or->libelleParc()) }} — pas de facture</p>
+        <p class="text-xs mt-0.5">Ce véhicule est restitué sans facture. Ses pièces sont reprises dans son récap de la période (avec le forfait mensuel).</p>
+    </div>
+    @endif
+
+    {{-- Accident : qui paie (modifiable jusqu'à la facture) --}}
+    @if($or->type === 'sinistre' || $or->assurance_id)
+    @include('partials.payeur-assurance', [
+        'modele'     => $or,
+        'action'     => route('ordres-reparations.payeur', $or),
+        'modifiable' => ! $or->facture,
+    ])
     @endif
 
     {{-- Motif & Réception --}}
@@ -1173,12 +1195,63 @@
 @endsection
 
 @push('scripts')
+@php
+    // Horaires de l'atelier pour le chronomètre : jour (0 = dimanche … 6 = samedi) →
+    // ouverture, fermeture et pauses actives en minutes depuis minuit ; null = jour fermé
+    $minutes = fn ($h) => (int) substr($h, 0, 2) * 60 + (int) substr($h, 3, 2);
+    $pausesChrono = \App\Models\PauseAtelier::actives()->get()->groupBy('jour');
+    $horairesChrono = \App\Models\HoraireAtelier::all()->mapWithKeys(fn ($h) => [
+        $h->jour => ($h->actif && $h->heure_debut && $h->heure_fin) ? [
+            'debut'  => $minutes($h->heure_debut),
+            'fin'    => $minutes($h->heure_fin),
+            'pauses' => $pausesChrono->get($h->jour, collect())->map(fn ($p) => [$minutes($p->heure_debut), $minutes($p->heure_fin)])->values(),
+        ] : null,
+    ]);
+@endphp
 <script>
 // Chronomètre des travaux en cours : temps écoulé depuis « Démarrer » et, si une
 // durée estimée existe, compte à rebours du temps restant (rouge une fois dépassé).
+// Comme la durée nette de fin de travaux : seules les heures d'ouverture de l'atelier
+// comptent — le chrono se met en pause la nuit, les jours fermés et pendant les pauses.
 (function () {
     const blocs = document.querySelectorAll('.chrono-travaux');
     if (!blocs.length) return;
+
+    const HORAIRES = @json($horairesChrono);
+    // Heure de l'atelier (Djibouti) quel que soit le fuseau du poste : décalage UTC en minutes
+    const DECALAGE = {{ now()->utcOffset() }} * 60000;
+    const JOUR = 86400000;
+    const horairesConnus = Object.values(HORAIRES).some(Boolean);
+
+    // Secondes travaillées entre deux instants (ms), hors fermeture et pauses
+    function secondesOuvrees(debut, fin) {
+        if (!horairesConnus) return (fin - debut) / 1000; // aucun horaire réglé : temps réel
+        let total = 0;
+        // Minuit (heure atelier) du jour de début, exprimé en temps « atelier »
+        let jour = Math.floor((debut + DECALAGE) / JOUR) * JOUR;
+        for (let i = 0; jour < fin + DECALAGE && i < 400; i++, jour += JOUR) {
+            const h = HORAIRES[new Date(jour).getUTCDay()];
+            if (!h) continue;
+            const plages = [];
+            let curseur = h.debut;
+            h.pauses.slice().sort((a, b) => a[0] - b[0]).forEach(function (p) {
+                if (p[0] > curseur) plages.push([curseur, Math.min(p[0], h.fin)]);
+                curseur = Math.max(curseur, p[1]);
+            });
+            if (curseur < h.fin) plages.push([curseur, h.fin]);
+            plages.forEach(function (pl) {
+                const a = Math.max(debut, jour - DECALAGE + pl[0] * 60000);
+                const b = Math.min(fin, jour - DECALAGE + pl[1] * 60000);
+                if (b > a) total += (b - a) / 1000;
+            });
+        }
+        return total;
+    }
+
+    // L'atelier travaille-t-il en ce moment ? (sinon le chrono est en pause)
+    function enHeuresOuvrees(maintenant) {
+        return !horairesConnus || secondesOuvrees(maintenant - 1000, maintenant) > 0;
+    }
 
     const format = (secondes) => {
         const s = Math.max(0, Math.floor(secondes));
@@ -1187,9 +1260,13 @@
     };
 
     function mettreAJour() {
+        const maintenant = Date.now();
+        const ouvert = enHeuresOuvrees(maintenant);
         blocs.forEach(function (bloc) {
-            const ecoule = (Date.now() - new Date(bloc.dataset.debut).getTime()) / 1000;
+            const ecoule = secondesOuvrees(new Date(bloc.dataset.debut).getTime(), maintenant);
             bloc.querySelector('[data-chrono-ecoule]').textContent = format(ecoule);
+            const pause = bloc.querySelector('[data-chrono-pause]');
+            if (pause) pause.classList.toggle('hidden', ouvert);
 
             const estimeeHeures = parseFloat(bloc.dataset.estimee);
             const reste = bloc.querySelector('[data-chrono-reste]');

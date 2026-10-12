@@ -55,23 +55,41 @@ class ParametreAtelierController extends Controller
         return back()->with('success', "Responsable qualité défini : {$nom}.");
     }
 
-    /**
-     * Main-d'œuvre ajoutée automatiquement à chaque facture flotte (une par
-     * bus) — cf. LivraisonFlotte::lignesProposees(). 0 = pas d'ajout.
-     */
-    public function updateMainOeuvreFlotte(Request $request)
+    /** Forfait mensuel par véhicule du parc leasing (récap leasing) */
+    public function updateForfaitLeasing(Request $request)
     {
         $data = $request->validate([
-            'main_oeuvre_flotte' => ['required', 'integer', 'min:0'],
+            'forfait_leasing' => ['required', 'integer', 'min:0'],
+            'forfait_service' => ['required', 'integer', 'min:0'],
         ], [
-            'main_oeuvre_flotte.required' => 'Indiquez le montant (0 pour ne rien ajouter).',
-            'main_oeuvre_flotte.integer'  => 'Le montant doit être un nombre entier de FDJ.',
-            'main_oeuvre_flotte.min'      => 'Le montant ne peut pas être négatif.',
+            'forfait_service.required' => 'Indiquez le forfait des véhicules de service (0 si aucun).',
+            'forfait_leasing.required' => 'Indiquez le forfait mensuel.',
+            'forfait_leasing.integer'  => 'Le forfait doit être un nombre entier de FDJ.',
+            'forfait_leasing.min'      => 'Le forfait ne peut pas être négatif.',
         ]);
 
         ParametreAtelier::get()->update($data);
 
-        return back()->with('success', 'Main-d\'œuvre flotte : ' . number_format($data['main_oeuvre_flotte'], 0, ',', ' ') . ' FDJ par facture.');
+        return back()->with('success', 'Forfaits par véhicule et par mois : parc leasing ' . number_format($data['forfait_leasing'], 0, ',', ' ') . ' FDJ, véhicules de service ' . number_format($data['forfait_service'], 0, ',', ' ') . ' FDJ.');
+    }
+
+    /** Forfaits mensuels HT par bus : bus leasing et bus du transport public (chacun son récap) */
+    public function updateForfaitBusLeasing(Request $request)
+    {
+        $data = $request->validate([
+            'forfait_bus_leasing'   => ['required', 'integer', 'min:0'],
+            'forfait_bus_transport' => ['required', 'integer', 'min:0'],
+        ], [
+            '*.required' => 'Indiquez le forfait mensuel par bus.',
+            '*.integer'  => 'Le forfait doit être un nombre entier de FDJ.',
+            '*.min'      => 'Le forfait ne peut pas être négatif.',
+        ]);
+
+        ParametreAtelier::get()->update($data);
+
+        $fmt = fn ($n) => number_format($n, 0, ',', ' ');
+
+        return back()->with('success', "Forfaits par bus et par mois : bus leasing {$fmt($data['forfait_bus_leasing'])} FDJ, bus transport public {$fmt($data['forfait_bus_transport'])} FDJ.");
     }
 
     /**

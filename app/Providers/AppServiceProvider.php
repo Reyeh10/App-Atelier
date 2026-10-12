@@ -19,6 +19,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        // Notifications avec son à chaque étape (cloche + push sur les appareils)
+        \App\Services\NotificationService::ecouter();
     }
 }

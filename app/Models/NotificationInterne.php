@@ -10,7 +10,7 @@ class NotificationInterne extends Model
     protected $table = 'notifications_internes';
 
     protected $fillable = [
-        'destinataire_id', 'type', 'titre', 'corps', 'or_id', 'lu_at',
+        'destinataire_id', 'type', 'titre', 'corps', 'or_id', 'lien', 'lu_at',
     ];
 
     protected $casts = [
@@ -57,23 +57,5 @@ class NotificationInterne extends Model
         }
     }
 
-    /**
-     * Envoie une notification à tous les utilisateurs pouvant restituer un véhicule
-     * (permission restituer_vehicule — rôle par défaut ou surcharge individuelle),
-     * dès qu'un OR passe au statut "prêt".
-     */
-    public static function notifierVehiculePret(string $titre, string $corps, int $orId): void
-    {
-        $destinataires = User::all()->filter(fn (User $user) => $user->hasPermission('restituer_vehicule'));
-
-        foreach ($destinataires as $user) {
-            self::create([
-                'destinataire_id' => $user->id,
-                'type'            => 'vehicule_pret',
-                'titre'           => $titre,
-                'corps'           => $corps,
-                'or_id'           => $orId,
-            ]);
-        }
-    }
+    // « Véhicule prêt à restituer » et les autres étapes : App\Services\NotificationService
 }

@@ -76,7 +76,10 @@ class EncaissementGlobalController extends Controller
         // Factures émises (non payées) et non déjà rattachées à un autre encaissement
         $facturesDisponibles = collect();
         if ($client) {
-            $facturesDisponibles = Facture::where('client_id', $client->id)
+            // Factures dues par ce compte : les siennes (hors celles payées par une
+            // assurance) et, pour une assurance, celles des accidents qu'elle paie
+            $facturesDisponibles = Facture::where(fn ($q) => $q->where(fn ($p) => $p->where('client_id', $client->id)->whereNull('assurance_id'))
+                         ->orWhere('assurance_id', $client->id))
                      ->whereNull('marque_garantie_id')
                      ->where('statut', 'emise')
                      ->whereNull('encaissement_global_id')
@@ -137,7 +140,8 @@ class EncaissementGlobalController extends Controller
         } else {
             $client = Client::where('id', $request->client_id)->where('compte_actif', true)->firstOrFail();
             $factures = Facture::whereIn('id', $request->facture_ids)
-                               ->where('client_id', $client->id)
+                               ->where(fn ($q) => $q->where(fn ($p) => $p->where('client_id', $client->id)->whereNull('assurance_id'))
+                                   ->orWhere('assurance_id', $client->id))
                                ->whereNull('marque_garantie_id')
                                ->where('statut', 'emise')
                                ->whereNull('encaissement_global_id')

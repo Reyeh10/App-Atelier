@@ -244,6 +244,39 @@
         </div>
         @endif
 
+        @if($motifVisite === 'accident')
+        {{-- Accident : qui paie ? Le véhicule reste au client, seule la facture va à l'assurance --}}
+        @php $assurances = \App\Models\Client::where('type', 'assurance')->orderBy('raison_sociale')->orderBy('nom')->get(); @endphp
+        <div id="bloc_payeur" class="border border-gray-200 rounded-xl p-4 space-y-3">
+            <p class="text-sm font-medium text-slate-700">Qui paie ?</p>
+            <div class="flex gap-4 text-sm">
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="payeur" value="client" {{ old('payeur', 'client') === 'client' ? 'checked' : '' }}
+                           onchange="document.getElementById('bloc_assurance').classList.add('hidden')"> Le client
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="payeur" value="assurance" {{ old('payeur') === 'assurance' ? 'checked' : '' }}
+                           onchange="document.getElementById('bloc_assurance').classList.remove('hidden')"> Une assurance
+                </label>
+            </div>
+            <div id="bloc_assurance" class="grid grid-cols-2 gap-3 {{ old('payeur') === 'assurance' ? '' : 'hidden' }}">
+                <select name="assurance_id" class="px-4 py-2.5 border border-gray-300 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-500 @error('assurance_id') border-red-400 @enderror">
+                    <option value="">— Choisir l'assurance —</option>
+                    @foreach($assurances as $a)
+                    <option value="{{ $a->id }}" {{ (int) old('assurance_id') === $a->id ? 'selected' : '' }}>{{ $a->nom_complet }}</option>
+                    @endforeach
+                </select>
+                <input type="text" name="numero_sinistre" value="{{ old('numero_sinistre') }}" maxlength="100" placeholder="N° de sinistre (facultatif)"
+                       class="px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
+                @error('assurance_id')<p class="col-span-2 text-xs text-red-600">{{ $message }}</p>@enderror
+                @if($assurances->isEmpty())
+                <p class="col-span-2 text-xs text-amber-600">Aucune assurance enregistrée : créez-la d'abord dans Clients (type « Assurance »).</p>
+                @endif
+            </div>
+            <p class="text-xs text-slate-400">Le véhicule reste au nom du client : seule la facture ira à l'assurance. Modifiable jusqu'à la facture.</p>
+        </div>
+        @endif
+
         <div>
             <label class="block text-xs text-slate-400 mb-1.5">Détails supplémentaires du client (optionnel — "{{ $motifLabel }}" suffit s'il n'y a rien à ajouter)</label>
             <textarea name="motif_entree" rows="4"

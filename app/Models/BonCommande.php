@@ -27,10 +27,11 @@ class BonCommande extends Model
 {
     protected $table = 'bons_commande';
 
-    protected $fillable = ['numero', 'devis_id', 'or_id', 'dossier_id', 'client_id', 'vehicule_id', 'statut', 'notes', 'fournisseur_repondu_at'];
+    protected $fillable = ['numero', 'devis_id', 'or_id', 'dossier_id', 'client_id', 'vehicule_id', 'leasing_bus', 'statut', 'notes', 'fournisseur_repondu_at'];
 
     protected $casts = [
         'fournisseur_repondu_at' => 'datetime',
+        'leasing_bus'            => 'boolean',
     ];
 
     // ── Relations ──────────────────────────────────────────────────────
@@ -169,6 +170,9 @@ class BonCommande extends Model
         }
         if ($enAttente = $lignes->first(fn (LigneBonCommande $l) => is_null($l->disponible))) {
             return "Le fournisseur (stcd-magasin) n'a pas encore validé la disponibilité de « {$enAttente->designation} ».";
+        }
+        if ($rupture = $lignes->first(fn (LigneBonCommande $l) => $l->estEnRupture())) {
+            return "« {$rupture->designation} » est en rupture au magasin : attendez son arrivée (le magasin la passera disponible puis fera le BT).";
         }
         if (! $this->bonTransfert) {
             return "Le magasin n'a pas encore fait le bon de transfert (BT) : les pièces n'ont pas quitté le magasin. Si vous avez reçu le BT sur papier, joignez-le d'abord.";

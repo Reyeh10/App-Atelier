@@ -10,11 +10,6 @@
        class="flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 border border-gray-300 rounded-lg px-3 py-2 transition-colors">
         ← OR {{ $facture->ordreReparation->numero }}
     </a>
-    @elseif($facture->livraisonFlotte)
-    <a href="{{ route('flotte.show', $facture->livraisonFlotte->import_flotte_id) }}"
-       class="flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 border border-gray-300 rounded-lg px-3 py-2 transition-colors">
-        ← Import flotte {{ $facture->livraisonFlotte->import?->numero }}
-    </a>
     @endif
     <a href="{{ route('factures.imprimer', $facture) }}?apercu=1" target="_blank"
        class="flex items-center gap-2 text-sm border border-gray-300 text-slate-700 hover:bg-gray-50 rounded-lg px-3 py-2 transition-colors">
@@ -143,6 +138,22 @@
             @endif
         </div>
     </div>
+
+    {{-- L'administrateur corrige le mode de paiement (erreur de saisie à la caisse) --}}
+    @if(auth()->user()->isAdmin() && (float) $facture->montant_paye > 0 && $facture->statut !== 'annulee')
+    <form method="POST" action="{{ route('factures.mode-paiement', $facture) }}"
+          onsubmit="return confirm('Corriger le mode de paiement de la facture {{ $facture->numero }} ?')"
+          class="mt-4 pt-4 border-t border-gray-100 flex items-center gap-3 flex-wrap">
+        @csrf @method('PATCH')
+        <label class="text-xs font-semibold text-slate-500">Corriger le mode de paiement (administrateur) :</label>
+        <select name="mode_paiement" class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-500">
+            @foreach(['especes' => 'Espèces', 'cheque' => 'Chèque', 'waafi' => 'Waafi', 'cac' => 'CAC', 'carte' => 'Carte', 'virement' => 'Virement', 'bon_commande' => 'Bon de commande'] as $val => $lib)
+            <option value="{{ $val }}" @selected($facture->mode_paiement === $val)>{{ $lib }}</option>
+            @endforeach
+        </select>
+        <button type="submit" class="text-sm bg-slate-700 hover:bg-slate-800 text-white font-semibold px-4 py-1.5 rounded-lg transition-colors">Enregistrer</button>
+    </form>
+    @endif
 
     {{-- Crédit accordé ou compte crédit actif --}}
     @if($facture->credit_accorde)

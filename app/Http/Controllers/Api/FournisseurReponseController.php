@@ -6,7 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Models\Activite;
 use App\Models\BonCommande;
 use App\Models\BonTransfert;
+
+use App\Services\NotificationService;
 use Illuminate\Http\Request;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
  * Reçoit les mises à jour de disponibilité envoyées par stcd-magasin
@@ -90,6 +93,8 @@ class FournisseurReponseController extends Controller
         );
         $bt->remplacerFichier($request->file('fichier'));
         $completees = $bt->reporterReferences();
+
+        NotificationService::bonTransfertRecu($bc, $bt->numero);
 
         Activite::journaliser(
             'bon_transfert_recu',

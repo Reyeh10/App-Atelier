@@ -83,9 +83,12 @@ class Avoir extends Model
     /** Nom de l'entité créditée (marque garantie, sinon le client) */
     public function getPayeurNomAttribute(): string
     {
-        return $this->marque_garantie_id
-            ? $this->marqueGarantie->nom . ' (garantie constructeur)'
-            : $this->client->nom_complet;
+        if ($this->marque_garantie_id) {
+            return $this->marqueGarantie->nom . ' (garantie constructeur)';
+        }
+
+        // Facture payée par une assurance : l'avoir lui revient aussi
+        return $this->facture?->assurance_id ? $this->facture->payeur_nom : $this->client->nom_complet;
     }
 
     // ── Numérotation ───────────────────────────────────────────────────

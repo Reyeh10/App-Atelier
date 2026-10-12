@@ -167,6 +167,16 @@ class Devis extends Model
         return (bool) $this->ordreReparation?->facture;
     }
 
+    /**
+     * Devis sans réception (« devis libre ») : établi sans réservation, pas encore
+     * repris par un dossier ni un OR. Seul ce devis permet de saisir à la main le
+     * prix d'une pièce (sinon le prix vient toujours du magasin).
+     */
+    public function estLibre(): bool
+    {
+        return $this->estEnAvance() && ! $this->reservation_id;
+    }
+
     /** Devis établi avant toute réception (pas encore d'OR ni de dossier) */
     public function estEnAvance(): bool
     {
@@ -262,13 +272,32 @@ class Devis extends Model
      */
     public function recalculer(): void
     {
-        // Montants au franc (FDJ), comme les lignes
-        $ht  = round((float) $this->lignes()->sum('total_ht'));
-        $tva = round($ht * $this->taux_tva / 100);
+        // Même arrondi qu'à la facture (TTC multiple de 5 FDJ), y compris quand le prix
+        // du magasin arrive après coup : la facture reprend alors exactement le devis
+        $lignes = $this->lignes()->get();
+        $calcul = $lignes->map(fn (LigneDevis $l) => [
+            'id'            => $l->id,
+            'type'          => $l->type,
+            'quantite'      => (float) $l->quantite,
+            'prix_unitaire' => (float) $l->prix_unitaire,
+            'remise'        => (float) $l->remise,
+            'total_ht'      => (float) $l->total_ht,
+            'prix_manuel'   => (bool) $l->prix_manuel,
+        ])->all();
+
+        [$ht, $tva, $ttc] = \App\Services\ArrondiFdjService::arrondir($calcul, (float) $this->taux_tva);
+
+        foreach ($calcul as $c) {
+            $ligne = $lignes->firstWhere('id', $c['id']);
+            if ((float) $ligne->prix_unitaire !== (float) $c['prix_unitaire'] || (float) $ligne->total_ht !== (float) $c['total_ht']) {
+                $ligne->update(['prix_unitaire' => $c['prix_unitaire'], 'total_ht' => $c['total_ht']]);
+            }
+        }
+
         $this->update([
             'montant_ht'  => $ht,
             'montant_tva' => $tva,
-            'montant_ttc' => $ht + $tva,
+            'montant_ttc' => $ttc,
         ]);
     }
 

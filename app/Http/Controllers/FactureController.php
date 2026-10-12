@@ -33,14 +33,17 @@ class FactureController extends Controller
     {
         // Classées par numéro, le plus grand en premier : année puis numéro de la
         // facture (« 101/GARA/2026 » → 2026 puis 101), comparés comme des nombres
-        $query = Facture::with(['client', 'marqueGarantie', 'ordreReparation', 'vehicule'])
+        $query = Facture::with(['client', 'assurance', 'marqueGarantie', 'ordreReparation.vehicule', 'vehicule'])
             ->orderByRaw("CAST(SUBSTRING_INDEX(numero, '/', -1) AS UNSIGNED) DESC")
             ->orderByRaw("CAST(SUBSTRING_INDEX(numero, '/', 1) AS UNSIGNED) DESC");
 
         // Recherche : n° de facture, client (nom, téléphone), n° d'OR, immatriculation,
         // marque garantie ou n° de bon de commande client
         if ($recherche = trim((string) $request->get('recherche'))) {
-            $query->where(function ($q) use ($recherche) {
+            $immatCherchee = strtoupper(preg_replace('/[\s\-\.]+/', '', $recherche));
+            $immatSansSeparateur = fn ($v) => $v->where('immatriculation', 'like', "%{$recherche}%")
+                ->orWhereRaw("UPPER(REPLACE(REPLACE(REPLACE(immatriculation, ' ', ''), '-', ''), '.', '')) LIKE ?", ["%{$immatCherchee}%"]);
+            $query->where(function ($q) use ($recherche, $immatSansSeparateur) {
                 $q->where('numero', 'like', "%{$recherche}%")
                   ->orWhere('numero_bon_commande_client', 'like', "%{$recherche}%")
                   ->orWhereHas('client', fn ($c) => $c->where('nom', 'like', "%{$recherche}%")
@@ -48,10 +51,20 @@ class FactureController extends Controller
                       ->orWhere('raison_sociale', 'like', "%{$recherche}%")
                       ->orWhere('telephone', 'like', "%{$recherche}%"))
                   ->orWhereHas('ordreReparation', fn ($o) => $o->where('numero', 'like', "%{$recherche}%"))
-                  ->orWhereHas('vehicule', fn ($v) => $v->where('immatriculation', 'like', "%{$recherche}%"))
-                  ->orWhereHas('ordreReparation.vehicule', fn ($v) => $v->where('immatriculation', 'like', "%{$recherche}%"))
-                  ->orWhereHas('marqueGarantie', fn ($m) => $m->where('nom', 'like', "%{$recherche}%"));
+                  // Immatriculation : avec ou sans espaces / tirets (« 45D81 », « 45 D 81 », « 45-D-81 »)
+                  ->orWhereHas('vehicule', fn ($v) => $immatSansSeparateur($v))
+                  ->orWhereHas('ordreReparation.vehicule', fn ($v) => $immatSansSeparateur($v))
+                  ->orWhereHas('marqueGarantie', fn ($m) => $m->where('nom', 'like', "%{$recherche}%"))
+                  ->orWhereHas('assurance', fn ($a) => $a->where('nom', 'like', "%{$recherche}%")->orWhere('raison_sociale', 'like', "%{$recherche}%"))
+                  ->orWhereHas('ordreReparation', fn ($o) => $o->where('numero_sinistre', 'like', "%{$recherche}%"));
             });
+        }
+
+        // Filtre « payées par les assurances » (toutes, ou une assurance précise)
+        if ($request->get('payeur') === 'assurance') {
+            $request->filled('assurance_id')
+                ? $query->where('assurance_id', $request->get('assurance_id'))
+                : $query->whereNotNull('assurance_id');
         }
 
         // Filtre par statut de la facture (emise, payee, annulee...)
@@ -79,7 +92,9 @@ class FactureController extends Controller
 
         $factures = $query->paginate(30)->withQueryString();
 
-        return view('factures.index', compact('factures', 'totalEmises', 'totalPayees', 'nbEmises', 'nbPayees'));
+        $assurances = \App\Models\Client::where('type', 'assurance')->orderBy('raison_sociale')->orderBy('nom')->get();
+
+        return view('factures.index', compact('factures', 'totalEmises', 'totalPayees', 'nbEmises', 'nbPayees', 'assurances'));
     }
 
     /**
@@ -91,7 +106,9 @@ class FactureController extends Controller
     {
         $orsAFacturer = OrdreReparation::with(['client', 'vehicule', 'allDevis', 'photosOr'])
             ->aFacturer()
-            ->orderBy('date_entree')
+            // Le dernier véhicule devenu prêt (dernière mise à jour de l'OR) en haut
+            ->orderByDesc('updated_at')
+            ->orderByDesc('id')
             ->get();
 
         return view('factures.a-facturer', compact('orsAFacturer'));
@@ -238,8 +255,9 @@ class FactureController extends Controller
                 return back()->with('error', "Impossible de créer la facture : le plafond du compte garantie {$marqueGarantie->nom} est atteint ({$solde} FDJ utilisés sur {$plafond} FDJ autorisés).");
             }
         } else {
-            // Bloquer si le client a un compte crédit mais a dépassé son plafond
-            $client = $ordresReparation->client;
+            // Bloquer si le compte qui paie (assurance pour un accident, sinon le client)
+            // a un compte crédit dont le plafond est dépassé
+            $client = $ordresReparation->assurance ?? $ordresReparation->client;
             if ($client->compte_actif && $client->plafond_compte && ! $client->peutFacturerSurCompte()) {
                 $plafond = number_format($client->plafond_compte, 0, ',', ' ');
                 $solde   = number_format($client->solde_compte,   0, ',', ' ');
@@ -288,6 +306,8 @@ class FactureController extends Controller
                 'or_id'              => $ordresReparation->id,
                 'devis_id'           => null,
                 'client_id'          => $ordresReparation->client_id,
+                // Accident payé par l'assurance : facture adressée à l'assurance
+                'assurance_id'       => $marqueGarantie ? null : $ordresReparation->assurance_id,
                 'marque_garantie_id' => $marqueGarantie?->id,
                 'statut'             => 'emise',
                 'mode_paiement'      => null,
@@ -358,6 +378,39 @@ class FactureController extends Controller
      * Note : le passage à "livré" de l'OR se fait via le workflow de restitution,
      * pas automatiquement ici (pour ne pas contourner la vérification d'état du véhicule).
      */
+    /**
+     * L'administrateur corrige le mode de paiement d'une facture déjà réglée (en tout
+     * ou en partie) — erreur de saisie à la caisse. Le mode corrigé est celui du
+     * dernier versement ; la correction est notée dans le journal.
+     */
+    public function changerModePaiement(Request $request, Facture $facture)
+    {
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->isAdmin()) {
+            abort(403);
+        }
+        if ((float) $facture->montant_paye <= 0 || $facture->statut === 'annulee') {
+            return back()->with('error', "Facture {$facture->numero} : aucun paiement à corriger.");
+        }
+
+        $data = $request->validate([
+            'mode_paiement' => ['required', 'in:especes,cheque,waafi,cac,carte,virement,bon_commande'],
+        ], [
+            'mode_paiement.in' => 'Mode de paiement invalide.',
+        ]);
+        if ($data['mode_paiement'] === 'bon_commande' && ! $facture->numero_bon_commande_client) {
+            return back()->with('error', "Facture {$facture->numero} : pour « Bon de commande », il faut le numéro du bon — enregistrez le paiement depuis la fiche de la facture.");
+        }
+
+        $avant = $facture->getModePaiementLabel();
+        $facture->update(['mode_paiement' => $data['mode_paiement']]);
+        Activite::journaliser('corriger_mode_paiement', "Facture {$facture->numero} : mode de paiement corrigé « {$avant} » → « {$facture->getModePaiementLabel()} »", $facture);
+
+        return back()->with('success', "Facture {$facture->numero} : mode de paiement corrigé ({$avant} → {$facture->getModePaiementLabel()}).");
+    }
+
     public function marquerPayee(Request $request, Facture $facture)
     {
        /** @var User|null $user */
@@ -457,7 +510,7 @@ class FactureController extends Controller
                 return back()->with('error', "Impossible de mettre sur le compte : cette facture ({$montant} FDJ) dépasserait le plafond du compte garantie {$marque->nom} (solde actuel {$solde} FDJ / plafond {$plafond} FDJ).");
             }
         } else {
-            $client = $facture->client;
+            $client = $facture->compteDebiteur();
             if ($client->compte_actif && $client->plafond_compte && ! $client->peutFacturerSurCompte($montantRestant)) {
                 $plafond   = number_format($client->plafond_compte, 0, ',', ' ');
                 $solde     = number_format($client->solde_compte,   0, ',', ' ');
@@ -666,6 +719,7 @@ class FactureController extends Controller
                 'or_id'                            => $facture->or_id,
                 'devis_id'                         => $facture->devis_id,
                 'client_id'                        => $facture->client_id,
+                'assurance_id'                     => $facture->assurance_id,
                 'marque_garantie_id'               => $facture->marque_garantie_id,
                 'statut'                           => $estPayee ? 'payee' : 'emise',
                 'mode_paiement'                    => $reporte > 0 ? $facture->mode_paiement : null,

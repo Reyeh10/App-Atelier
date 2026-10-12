@@ -89,7 +89,7 @@
         <p class="font-mono font-bold text-slate-900">{{ $bonCommande->ordreReparation->numero }}</p>
         @elseif($bonCommande->livraisonFlotte)
         <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Livraison flotte</p>
-        <a href="{{ route('flotte.show', $bonCommande->livraisonFlotte->import_flotte_id) }}" class="font-mono font-bold text-orange-500 hover:underline">{{ $bonCommande->livraisonFlotte->import?->numero }}</a>
+        <p class="font-mono font-bold text-slate-900">{{ $bonCommande->livraisonFlotte->import?->numero }}</p>
         <p class="text-xs text-indigo-600 mt-0.5">Pièces livrées le {{ $bonCommande->livraisonFlotte->date_livraison->format('d/m/Y') }} — sans OR</p>
         @else
         <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Dossier de réception</p>
@@ -112,6 +112,8 @@
                 <th class="px-5 py-3 text-left text-xs font-semibold text-slate-500">Désignation</th>
                 <th class="px-5 py-3 text-left text-xs font-semibold text-slate-500 font-mono">Référence</th>
                 <th class="px-5 py-3 text-center text-xs font-semibold text-slate-500">Qté</th>
+                <th class="px-5 py-3 text-right text-xs font-semibold text-slate-500">Prix unit.</th>
+                <th class="px-5 py-3 text-right text-xs font-semibold text-slate-500">Montant</th>
                 <th class="px-5 py-3 text-center text-xs font-semibold text-slate-500">Disponibilité fournisseur</th>
                 <th class="px-5 py-3 text-center text-xs font-semibold text-slate-500">Reçu au garage</th>
             </tr>
@@ -124,11 +126,16 @@
                 </td>
                 <td class="px-5 py-3 font-mono text-sm text-orange-600 font-bold">{{ $ligne->reference ?: '—' }}</td>
                 <td class="px-5 py-3 text-center font-bold text-slate-700">{{ rtrim(rtrim(number_format($ligne->quantite, 2, ',', ' '), '0'), ',') }}</td>
+                @php $prixAff = $ligne->prixUnitaireAffiche(); $montantAff = $ligne->montantAffiche(); @endphp
+                <td class="px-5 py-3 text-right text-slate-700">{{ $prixAff ? number_format($prixAff, 0, ',', ' ') : '—' }}</td>
+                <td class="px-5 py-3 text-right font-semibold text-slate-800">{{ $montantAff ? number_format($montantAff, 0, ',', ' ') : '—' }}</td>
                 <td class="px-5 py-3 text-center">
                     @if(is_null($ligne->disponible))
                         <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">En attente</span>
                     @elseif($ligne->disponible)
                         <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">Disponible{{ $ligne->quantite_disponible !== null ? ' ('.rtrim(rtrim(number_format($ligne->quantite_disponible, 2, ',', ' '), '0'), ',').')' : '' }}</span>
+                    @elseif($ligne->estEnRupture())
+                        <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-700">En rupture — en attente du magasin</span>
                     @else
                         <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700">Indisponible</span>
                     @endif
@@ -145,7 +152,7 @@
                         </button>
                     </form>
                     @elseif(auth()->user()->peutGererBonsCommande())
-                        <span class="text-xs text-slate-300" title="{{ $raisonLigne }}">○ {{ is_null($ligne->disponible) ? 'En attente (fournisseur)' : ($ligne->disponible ? 'En attente du BT' : 'Indisponible') }}</span>
+                        <span class="text-xs text-slate-300" title="{{ $raisonLigne }}">○ {{ is_null($ligne->disponible) ? 'En attente (fournisseur)' : ($ligne->disponible ? 'En attente du BT' : ($ligne->estEnRupture() ? 'En rupture' : 'Indisponible')) }}</span>
                     @else
                         <span class="text-xs text-slate-400">{{ $ligne->recu ? '✓ Reçu' : '○ En attente' }}</span>
                     @endif
@@ -153,6 +160,14 @@
             </tr>
             @endforeach
         </tbody>
+        {{-- Même total que « Total Général des Pièces » du devis (prix du devis, arrondi compris) --}}
+        <tfoot class="bg-gray-50 border-t border-gray-200">
+            <tr>
+                <td colspan="4" class="px-5 py-3 text-right text-sm font-bold text-slate-700">Total des pièces</td>
+                <td class="px-5 py-3 text-right font-bold text-slate-900 whitespace-nowrap">{{ number_format($bonCommande->lignes->sum(fn ($l) => $l->montantAffiche() ?? 0), 0, ',', ' ') }} FDJ</td>
+                <td colspan="2"></td>
+            </tr>
+        </tfoot>
     </table>
 </div>
 
@@ -187,17 +202,34 @@
                     <th class="py-2 text-left text-xs font-semibold text-slate-500">Référence</th>
                     <th class="py-2 text-left text-xs font-semibold text-slate-500">Désignation</th>
                     <th class="py-2 text-right text-xs font-semibold text-slate-500">Qté</th>
+                    <th class="py-2 text-right text-xs font-semibold text-slate-500">Prix unit.</th>
+                    <th class="py-2 text-right text-xs font-semibold text-slate-500">Montant</th>
                 </tr>
             </thead>
             <tbody class="divide-y divide-gray-100">
-                @foreach($bt->lignes as $l)
+                @php $totalBt = 0; @endphp
+                @foreach($bt->lignes as $i => $l)
+                @php
+                    // Ligne du BC correspondante (même position) : prix du devis
+                    $ligneBc = $bonCommande->lignes->values()->get($l['index'] ?? $i);
+                    $mtBt    = $ligneBc?->montantAffiche(isset($l['quantite']) ? (float) $l['quantite'] : null);
+                    $totalBt += $mtBt ?? 0;
+                @endphp
                 <tr>
                     <td class="py-2 font-mono text-xs text-slate-600">{{ $l['reference'] ?? '—' }}</td>
                     <td class="py-2 text-slate-700">{{ $l['designation'] ?? '—' }}</td>
                     <td class="py-2 text-right text-slate-600">{{ isset($l['quantite']) ? rtrim(rtrim(number_format((float) $l['quantite'], 2, ',', ' '), '0'), ',') : '—' }}</td>
+                    <td class="py-2 text-right text-slate-600">{{ $ligneBc?->prixUnitaireAffiche() ? number_format($ligneBc->prixUnitaireAffiche(), 0, ',', ' ') : '—' }}</td>
+                    <td class="py-2 text-right font-semibold text-slate-800">{{ $mtBt ? number_format($mtBt, 0, ',', ' ') : '—' }}</td>
                 </tr>
                 @endforeach
             </tbody>
+            <tfoot class="border-t border-gray-200">
+                <tr>
+                    <td colspan="4" class="py-2 text-right text-sm font-bold text-slate-700">Total des pièces</td>
+                    <td class="py-2 text-right font-bold text-slate-900 whitespace-nowrap">{{ number_format($totalBt, 0, ',', ' ') }} FDJ</td>
+                </tr>
+            </tfoot>
         </table>
         @endif
         @else

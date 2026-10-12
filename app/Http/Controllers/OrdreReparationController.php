@@ -209,6 +209,10 @@ class OrdreReparationController extends Controller
             $data['entretien_km_seuil'] = $entretienPalier;
         }
 
+        // Véhicule du parc leasing : pas de facture, pièces reprises dans le récap
+        $vehiculeOr = Vehicule::find($data['vehicule_id']);
+        $data['parc_leasing'] = \App\Models\VehiculeLeasing::contient($vehiculeOr?->immatriculation) || (bool) $vehiculeOr?->leasing_tiers;
+
         $or = OrdreReparation::create($data);
 
         // On met à jour le kilométrage (et le type de moteur, une fois connu) du véhicule
@@ -825,14 +829,8 @@ class OrdreReparationController extends Controller
             return back()->with('error', "Impossible de terminer le lavage : l'OR {$ordresReparation->numero} n'est pas au lavage (statut « {$ordresReparation->getStatutLabel()} »).");
         }
 
+        // Notifications « prêt à restituer » et « à facturer » : NotificationService
         $ordresReparation->update(['statut' => 'pret']);
-
-        $ordresReparation->loadMissing('client', 'vehicule');
-        NotificationInterne::notifierVehiculePret(
-            'Véhicule prêt à restituer',
-            "{$ordresReparation->numero} — {$ordresReparation->vehicule->immatriculation} ({$ordresReparation->client->nom_complet}) est prêt, le client peut venir le récupérer.",
-            $ordresReparation->id
-        );
 
         return back()->with('success', 'Lavage terminé — véhicule prêt, client peut être contacté.');
     }
@@ -938,6 +936,48 @@ class OrdreReparationController extends Controller
         $tech = Technicien::find($request->technicien_id);
         Activite::journaliser('affecter_technicien', "Affectation de {$tech->name} sur {$ordresReparation->numero}", $ordresReparation);
         return back()->with('success', 'Technicien affecté avec succès.');
+    }
+
+    /**
+     * Accident : choisit qui paie — le client ou une assurance (client de type
+     * « assurance ») avec le n° de sinistre. Modifiable jusqu'à la facture ; le
+     * véhicule reste au client.
+     */
+    public function changerPayeur(Request $request, OrdreReparation $ordresReparation)
+    {
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->hasPermission('creer_dossiers')) {
+            abort(403);
+        }
+        if ($ordresReparation->facture) {
+            return back()->with('error', "L'OR {$ordresReparation->numero} est déjà facturé : corrigez la facture par un avoir pour changer le payeur.");
+        }
+
+        $data = $request->validate([
+            'payeur'          => ['required', 'in:client,assurance'],
+            'assurance_id'    => [
+                \Illuminate\Validation\Rule::requiredIf(fn () => $request->input('payeur') === 'assurance'),
+                'nullable',
+                \Illuminate\Validation\Rule::exists('clients', 'id')->where('type', 'assurance'),
+            ],
+            'numero_sinistre' => ['nullable', 'string', 'max:100'],
+        ], [
+            'assurance_id.required' => "Choisissez l'assurance qui paie.",
+            'assurance_id.exists'   => "Ce client n'est pas une assurance.",
+        ]);
+        $parAssurance = $data['payeur'] === 'assurance';
+        $payeur = [
+            'assurance_id'    => $parAssurance ? $data['assurance_id'] : null,
+            'numero_sinistre' => $parAssurance ? ($data['numero_sinistre'] ?? null) : null,
+        ];
+
+        $ordresReparation->update($payeur);
+        $ordresReparation->dossier?->update($payeur);
+        Activite::journaliser('changer_payeur', "{$ordresReparation->numero} : payé par " . ($parAssurance ? "l'assurance " . $ordresReparation->fresh()->assurance?->nom_complet : 'le client'), $ordresReparation);
+
+        return back()->with('success', 'Payeur enregistré.');
     }
 
     /**

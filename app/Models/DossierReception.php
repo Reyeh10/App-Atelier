@@ -28,7 +28,7 @@ class DossierReception extends Model
     protected $table = 'dossiers_reception';
 
     protected $fillable = [
-        'numero', 'client_id', 'vehicule_id', 'conseiller_id', 'reservation_id',
+        'numero', 'client_id', 'assurance_id', 'numero_sinistre', 'vehicule_id', 'conseiller_id', 'reservation_id',
         'motif_visite', 'type_panne', 'canal_service', 'service_cle', 'canal_arrivee',
         'type_moteur_id', 'entretien_km_seuil',
         'kilometrage_entree', 'niveau_carburant', 'proprete_interne', 'proprete_externe',
@@ -56,6 +56,12 @@ class DossierReception extends Model
     public function ordreReparation(): BelongsTo { return $this->belongsTo(OrdreReparation::class, 'or_id'); }
 
     /** Devis établis pour ce dossier, avant transformation en OR */
+    /** Assurance qui paie (accident) — client de type « assurance » ; le véhicule reste au client */
+    public function assurance(): BelongsTo
+    {
+        return $this->belongsTo(Client::class, 'assurance_id');
+    }
+
     public function devis(): HasMany { return $this->hasMany(Devis::class, 'dossier_id')->orderBy('id'); }
 
     /** Dernier devis établi pour ce dossier */
@@ -82,6 +88,10 @@ class DossierReception extends Model
         $or = OrdreReparation::create([
             'numero'                => OrdreReparation::genererNumero(),
             'client_id'             => $this->client_id,
+            // Véhicule du parc leasing : pas de facture, pièces reprises dans le récap
+            'parc_leasing'          => VehiculeLeasing::contient($this->vehicule?->immatriculation) || (bool) $this->vehicule?->leasing_tiers,
+            'assurance_id'          => $this->assurance_id,
+            'numero_sinistre'       => $this->numero_sinistre,
             'vehicule_id'           => $this->vehicule_id,
             'conseiller_id'         => $this->conseiller_id,
             'type'                  => $type,

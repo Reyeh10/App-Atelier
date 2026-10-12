@@ -118,10 +118,33 @@
         </button>
         @endif
 
+        <div class="w-px h-8 bg-gray-200 self-center"></div>
+
+        {{-- Payeur : factures payées par les assurances --}}
+        <div>
+            <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Payeur</label>
+            <div class="flex gap-1.5 items-center">
+                <select name="payeur" onchange="this.form.submit()"
+                        class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <option value="">Tous</option>
+                    <option value="assurance" {{ request('payeur') === 'assurance' ? 'selected' : '' }}>Assurances</option>
+                </select>
+                @if(request('payeur') === 'assurance')
+                <select name="assurance_id" onchange="this.form.submit()"
+                        class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <option value="">Toutes les assurances</option>
+                    @foreach($assurances as $a)
+                    <option value="{{ $a->id }}" {{ (int) request('assurance_id') === $a->id ? 'selected' : '' }}>{{ $a->nom_complet }}</option>
+                    @endforeach
+                </select>
+                @endif
+            </div>
+        </div>
+
         {{-- Le statut choisi est gardé quand on lance une recherche ou une période --}}
         <input type="hidden" name="statut" value="{{ request('statut') }}">
 
-        @if(request()->anyFilled(['statut', 'periode', 'date_ref', 'recherche']))
+        @if(request()->anyFilled(['statut', 'periode', 'date_ref', 'recherche', 'payeur']))
         <a href="{{ route('factures.index') }}" class="text-xs text-slate-400 hover:text-slate-600 self-end pb-1.5">
             ✕ Effacer
         </a>
@@ -138,6 +161,7 @@
                 <tr class="border-b border-gray-200 bg-gray-50">
                     <th class="px-5 py-3 text-left text-xs font-semibold text-slate-500">Numéro</th>
                     <th class="px-5 py-3 text-left text-xs font-semibold text-slate-500">Client</th>
+                    <th class="px-5 py-3 text-left text-xs font-semibold text-slate-500">Véhicule</th>
                     <th class="px-5 py-3 text-left text-xs font-semibold text-slate-500">OR</th>
                     <th class="px-5 py-3 text-left text-xs font-semibold text-slate-500">Émise le</th>
                     <th class="px-5 py-3 text-left text-xs font-semibold text-slate-500">Mode</th>
@@ -157,6 +181,7 @@
                         <span class="ml-1 text-xs bg-indigo-100 text-indigo-700 font-semibold px-1.5 py-0.5 rounded">Garantie</span>
                         @endif
                     </td>
+                    <td class="px-5 py-3 font-mono text-xs font-bold text-slate-700 whitespace-nowrap">{{ $facture->vehiculeConcerne()?->immatriculation ?? '—' }}</td>
                     <td class="px-5 py-3">
                         @if($facture->ordreReparation)
                         <a href="{{ route('ordres-reparations.show', $facture->ordreReparation) }}"
@@ -165,12 +190,11 @@
                         </a>
                         @else
                         <span class="text-xs bg-indigo-100 text-indigo-700 font-semibold px-1.5 py-0.5 rounded">Flotte</span>
-                        <span class="font-mono text-xs text-slate-600">{{ $facture->vehicule?->immatriculation }}</span>
                         @endif
                     </td>
                     <td class="px-5 py-3 text-slate-500">{{ $facture->date_emission->format('d/m/Y') }}</td>
                     <td class="px-5 py-3 text-slate-500 text-xs">{{ $facture->getModePaiementLabel() }}</td>
-                    <td class="px-5 py-3 text-right font-bold text-slate-800">{{ number_format($facture->montant_ttc, 0, ',', ' ') }} FDJ</td>
+                    <td class="px-5 py-3 text-right font-bold text-slate-800 whitespace-nowrap">{{ number_format($facture->montant_ttc, 0, ',', ' ') }} FDJ</td>
                     <td class="px-5 py-3">
                         <span class="px-2 py-0.5 rounded-full text-xs font-bold
                             @if($facture->statut === 'payee') bg-green-100 text-green-700
@@ -197,7 +221,7 @@
                 </tr>
                 @empty
                 <tr>
-                    <td colspan="9" class="px-5 py-12 text-center text-slate-400">Aucune facture pour cette sélection.</td>
+                    <td colspan="10" class="px-5 py-12 text-center text-slate-400">Aucune facture pour cette sélection.</td>
                 </tr>
                 @endforelse
             </tbody>

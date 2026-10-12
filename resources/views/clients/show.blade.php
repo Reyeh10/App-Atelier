@@ -252,6 +252,64 @@
     </div>
 </div>
 
+{{-- ══ Leasing tiers : véhicules du client loués à STCD + sa partie des récaps ══ --}}
+@if((auth()->user()->isAdmin() && $client->vehicules->isNotEmpty()) || $partsLeasingTiers->isNotEmpty() || $client->vehicules->where('leasing_tiers', true)->isNotEmpty())
+<div class="bg-white rounded-2xl border border-gray-200 p-5 mt-6">
+    <h3 class="font-semibold text-slate-800">Leasing tiers</h3>
+    <p class="text-xs text-slate-500 mt-0.5 mb-4">Véhicules de ce client loués à STCD : pas de facture au passage ; chaque mois, forfait + pièces dans le récap leasing tiers.</p>
+
+    @if(auth()->user()->isAdmin())
+    <form method="POST" action="{{ route('leasing-tiers.vehicules', $client) }}" class="space-y-2 mb-5">
+        @csrf @method('PATCH')
+        <div class="flex flex-wrap gap-3">
+            @foreach($client->vehicules as $v)
+            <label class="flex items-center gap-2 text-sm border border-gray-200 rounded-xl px-3 py-2 cursor-pointer hover:border-orange-300">
+                <input type="checkbox" name="vehicule_ids[]" value="{{ $v->id }}" {{ $v->leasing_tiers ? 'checked' : '' }} class="rounded border-gray-300">
+                <span class="font-mono font-bold text-slate-800">{{ $v->immatriculation }}</span>
+                <span class="text-xs text-slate-500">{{ $v->designation }}</span>
+            </label>
+            @endforeach
+        </div>
+        <button type="submit" class="bg-orange-500 hover:bg-orange-600 text-white text-sm font-bold px-4 py-2 rounded-xl transition-colors">Enregistrer</button>
+    </form>
+    @elseif($client->vehicules->where('leasing_tiers', true)->isNotEmpty())
+    <p class="text-sm text-slate-700 mb-4">En leasing tiers :
+        <span class="font-mono font-bold">{{ $client->vehicules->where('leasing_tiers', true)->pluck('immatriculation')->implode(', ') }}</span></p>
+    @endif
+
+    @if($partsLeasingTiers->isNotEmpty())
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th class="px-4 py-2 text-left text-xs font-semibold text-slate-500">Période</th>
+                    <th class="px-4 py-2 text-left text-xs font-semibold text-slate-500">Véhicules</th>
+                    <th class="px-4 py-2 text-right text-xs font-semibold text-slate-500">Pièces</th>
+                    <th class="px-4 py-2 text-right text-xs font-semibold text-slate-500">Forfait</th>
+                    <th class="px-4 py-2 text-right text-xs font-semibold text-slate-500">Total HT</th>
+                    <th class="px-4 py-2"></th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+                @foreach($partsLeasingTiers as $r)
+                <tr class="hover:bg-gray-50">
+                    <td class="px-4 py-2 text-slate-800">{{ $r->periode_label }}</td>
+                    <td class="px-4 py-2 font-mono text-xs text-slate-600">{{ $r->lignes->pluck('immatriculation')->implode(', ') }}</td>
+                    <td class="px-4 py-2 text-right text-slate-700">{{ number_format((float) $r->lignes->sum('montant_pieces'), 0, ',', ' ') }}</td>
+                    <td class="px-4 py-2 text-right text-slate-700">{{ number_format((float) $r->lignes->sum('forfait'), 0, ',', ' ') }}</td>
+                    <td class="px-4 py-2 text-right font-bold text-slate-900">{{ number_format((float) $r->lignes->sum('total'), 0, ',', ' ') }} FDJ</td>
+                    <td class="px-4 py-2 text-right"><a href="{{ route('leasing.recaps.client', [$r, $client]) }}" target="_blank" class="text-xs text-orange-500 hover:underline font-semibold">🖨 Imprimer</a></td>
+                </tr>
+                @endforeach
+            </tbody>
+        </table>
+    </div>
+    @elseif(auth()->user()->isAdmin() || auth()->user()->hasPermission('encaisser_factures'))
+    <p class="text-xs text-slate-400">Aucun récap leasing tiers pour ce client pour le moment.</p>
+    @endif
+</div>
+@endif
+
 @if(auth()->user()->hasPermission('voir_factures'))
 {{-- ══ Pièces et main-d'œuvre facturées (tous ses véhicules) ═══════════ --}}
 @include('partials.lignes-facturees', [
