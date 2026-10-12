@@ -26,8 +26,8 @@ class OrdreReparation extends Model
 
     protected $fillable = [
         // Identification et affectation
-        'numero', 'client_id', 'vehicule_id', 'conseiller_id', 'technicien_id',
-        'service', 'service_gratuit', 'date_affectation', 'chef_id',
+        'numero', 'client_id', 'assurance_id', 'numero_sinistre', 'vehicule_id', 'conseiller_id', 'technicien_id',
+        'service', 'service_gratuit', 'parc_leasing', 'date_affectation', 'chef_id',
         'controle_qualite_technicien_id',
         // Statut et type
         'type', 'statut', 'statut_garantie', 'motif_refus_garantie', 'motif_approbation_garantie',
@@ -67,6 +67,9 @@ class OrdreReparation extends Model
 
     /** Client propriétaire du véhicule */
     public function client(): BelongsTo     { return $this->belongsTo(Client::class); }
+
+    /** Assurance qui paie (accident) — client de type « assurance » ; le véhicule reste au client */
+    public function assurance(): BelongsTo  { return $this->belongsTo(Client::class, 'assurance_id'); }
 
     /** Véhicule concerné par cet OR */
     public function vehicule(): BelongsTo   { return $this->belongsTo(Vehicule::class); }
@@ -121,6 +124,7 @@ class OrdreReparation extends Model
     public function scopeAFacturer($query)
     {
         return $query->where('service_gratuit', false)
+            ->where(fn ($q) => $q->where('parc_leasing', false)->orWhere(fn ($q2) => $q2->payeParTiers()))
             ->whereDoesntHave('facture')
             ->where(function ($q) {
                 $q->where('statut', 'pret')
@@ -138,11 +142,48 @@ class OrdreReparation extends Model
         return $this->raisonNonFacturable() === null;
     }
 
+    /**
+     * Payé par un tiers : garantie constructeur approuvée (facture à la marque) ou
+     * accident pris en charge par une assurance (facture à l'assurance). Même pour
+     * un véhicule en leasing, l'OR est alors facturé et sort du récap.
+     */
+    public function payeParTiers(): bool
+    {
+        return ($this->type === 'garantie' && $this->statut_garantie === 'approuve') || $this->assurance_id !== null;
+    }
+
+    public function scopePayeParTiers($query)
+    {
+        return $query->where(fn ($q) => $q->where(fn ($g) => $g->where('type', 'garantie')->where('statut_garantie', 'approuve'))
+            ->orWhereNotNull('assurance_id'));
+    }
+
+    /** Véhicule en leasing (parc, tiers, service, bus) et pas payé par un tiers : pas de facture, pièces au récap */
+    public function sansFactureLeasing(): bool
+    {
+        return (bool) $this->parc_leasing && ! $this->payeParTiers();
+    }
+
+    /** Liste du véhicule non facturé : « leasing tiers », « parc leasing STCD », « véhicule de service »… */
+    public function libelleParc(): string
+    {
+        if ($this->vehicule?->leasing_tiers) {
+            return 'véhicule en leasing tiers';
+        }
+        $categorie = VehiculeLeasing::categorieDe($this->vehicule?->immatriculation);
+
+        return VehiculeLeasing::PARCS_OR[$categorie]['or']
+            ?? (isset(VehiculeLeasing::GROUPES_BUS[$categorie]) ? 'bus (' . mb_strtolower(VehiculeLeasing::GROUPES_BUS[$categorie]['libelle']) . ')' : 'véhicule du parc leasing');
+    }
+
     /** Pourquoi l'OR ne peut pas encore être facturé (null s'il peut l'être) */
     public function raisonNonFacturable(): ?string
     {
         if ($this->service_gratuit) {
             return "L'OR {$this->numero} est un service gratuit : il n'est pas facturé.";
+        }
+        if ($this->sansFactureLeasing()) {
+            return "Le véhicule de l'OR {$this->numero} est un {$this->libelleParc()} : pas de facture, ses pièces sont reprises dans son récap.";
         }
         if ($this->facture) {
             return "L'OR {$this->numero} a déjà la facture {$this->facture->numero}.";
@@ -172,7 +213,8 @@ class OrdreReparation extends Model
             return (bool) $this->facture?->peutEtreRestitue();
         }
 
-        return $this->service_gratuit && $this->statut === 'pret';
+        // Service gratuit ou véhicule du parc leasing : pas de facture à attendre
+        return ($this->service_gratuit || $this->sansFactureLeasing()) && $this->statut === 'pret';
     }
 
     /** Pourquoi le véhicule ne peut pas encore être restitué (message pour l'utilisateur) */
@@ -272,7 +314,9 @@ class OrdreReparation extends Model
                 $q2->where('statut', 'facture')
                    ->whereHas('facture', fn ($q3) => $q3->where('statut', 'payee')->orWhere('credit_accorde', true));
             })->orWhere(function ($q2) {
-                $q2->where('service_gratuit', true)->where('statut', 'pret');
+                $q2->where(fn ($q3) => $q3->where('service_gratuit', true)
+                    ->orWhere(fn ($q4) => $q4->where('parc_leasing', true)->whereNot(fn ($q5) => $q5->payeParTiers())))
+                   ->where('statut', 'pret');
             });
         });
     }

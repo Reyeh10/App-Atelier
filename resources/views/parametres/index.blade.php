@@ -419,29 +419,55 @@ $nomsJours = [
         </form>
     </div>
 
-    {{-- ── Main-d'œuvre flotte ───────────────────────────────────── --}}
-    <div class="mt-6 bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-700 overflow-hidden max-w-xl">
-        <div class="px-6 py-4 border-b border-gray-100 dark:border-slate-700 flex items-center gap-3">
-            <div class="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-slate-700 flex items-center justify-center flex-shrink-0">
-                <svg class="w-5 h-5 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M8 7h8m-8 4h8m-9 8h10a2 2 0 002-2V7a4 4 0 00-4-4H9a4 4 0 00-4 4v10a2 2 0 002 2zm0 0v2m10-2v2M7 15h.01M17 15h.01"/>
-                </svg>
-            </div>
-            <div>
-                <h2 class="font-semibold text-slate-800 dark:text-slate-100">Main-d'œuvre flotte</h2>
-                <p class="text-xs text-slate-500 dark:text-slate-400">Ajoutée automatiquement à chaque facture de bus (livraisons flotte), sauf si le fichier Excel contient déjà une main-d'œuvre pour ce bus — modifiable avant de créer la facture</p>
-            </div>
+    {{-- ── Forfait mensuel du parc leasing ──────────────────────── --}}
+    <div class="mt-6 bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-700 overflow-hidden">
+        <div class="px-6 py-4 border-b border-gray-100 dark:border-slate-700">
+            <h2 class="font-semibold text-slate-800 dark:text-slate-100">Forfaits parc leasing et véhicules de service</h2>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Montant HT compté chaque mois pour chaque véhicule du parc leasing dans le récap, qu'il soit venu ou non au garage</p>
         </div>
-
-        <form method="POST" action="{{ route('parametres.main-oeuvre-flotte.update') }}" class="px-6 py-4 flex gap-3 items-end">
+        <form method="POST" action="{{ route('parametres.forfait-leasing.update') }}" class="px-6 py-4 flex gap-3 items-end">
             @csrf @method('PATCH')
             <div class="flex-1">
-                <label class="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Montant HT par facture (FDJ)</label>
-                <input type="number" name="main_oeuvre_flotte" min="0" step="1" required
-                       value="{{ old('main_oeuvre_flotte', $parametreAtelier->main_oeuvre_flotte) }}"
+                <label class="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Parc leasing — par véhicule et par mois (FDJ)</label>
+                <input type="number" name="forfait_leasing" min="0" step="1" required
+                       value="{{ old('forfait_leasing', $parametreAtelier->forfait_leasing) }}"
                        class="w-full px-3 py-2.5 border border-gray-300 dark:border-slate-600 rounded-xl text-sm
                               bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                <p class="text-xs text-slate-400 dark:text-slate-500 mt-1">0 = ne rien ajouter.</p>
+            </div>
+            <div class="flex-1">
+                <label class="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Véhicules de service — par véhicule et par mois (FDJ)</label>
+                <input type="number" name="forfait_service" min="0" step="1" required
+                       value="{{ old('forfait_service', $parametreAtelier->forfait_service) }}"
+                       class="w-full px-3 py-2.5 border border-gray-300 dark:border-slate-600 rounded-xl text-sm
+                              bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            </div>
+            <button type="submit" class="px-6 py-2.5 bg-indigo-500 hover:bg-indigo-600 text-white text-sm font-semibold rounded-xl transition-colors">
+                Enregistrer
+            </button>
+        </form>
+    </div>
+
+    {{-- ── Forfait mensuel des bus en leasing ────────────────────── --}}
+    <div class="mt-6 bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-700 overflow-hidden">
+        <div class="px-6 py-4 border-b border-gray-100 dark:border-slate-700">
+            <h2 class="font-semibold text-slate-800 dark:text-slate-100">Forfaits bus</h2>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Montant HT compté chaque mois pour chaque bus dans le récap de son groupe, qu'il ait eu des pièces ou non</p>
+        </div>
+        <form method="POST" action="{{ route('parametres.forfait-bus-leasing.update') }}" class="px-6 py-4 flex gap-3 items-end">
+            @csrf @method('PATCH')
+            <div class="flex-1">
+                <label class="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Bus leasing — par bus et par mois (FDJ)</label>
+                <input type="number" name="forfait_bus_leasing" min="0" step="1" required
+                       value="{{ old('forfait_bus_leasing', $parametreAtelier->forfait_bus_leasing) }}"
+                       class="w-full px-3 py-2.5 border border-gray-300 dark:border-slate-600 rounded-xl text-sm
+                              bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            </div>
+            <div class="flex-1">
+                <label class="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Bus transport public — par bus et par mois (FDJ)</label>
+                <input type="number" name="forfait_bus_transport" min="0" step="1" required
+                       value="{{ old('forfait_bus_transport', $parametreAtelier->forfait_bus_transport) }}"
+                       class="w-full px-3 py-2.5 border border-gray-300 dark:border-slate-600 rounded-xl text-sm
+                              bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">
             </div>
             <button type="submit" class="px-6 py-2.5 bg-indigo-500 hover:bg-indigo-600 text-white text-sm font-semibold rounded-xl transition-colors">
                 Enregistrer

@@ -31,6 +31,13 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    // Notifications push (sonnerie de l'appareil, même système fermé) — clés : php artisan push:cles
+    'webpush' => [
+        'public_key'  => env('VAPID_PUBLIC_KEY'),
+        'private_key' => env('VAPID_PRIVATE_KEY'),
+        'subject'     => env('VAPID_SUBJECT', 'mailto:contact@stcd.dj'),
+    ],
+
     'stcd_magasin' => [
         'url'           => env('STCD_MAGASIN_URL'),
         'token'         => env('STCD_MAGASIN_TOKEN'),

@@ -18,7 +18,7 @@
         .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px; }
         .company-logo { height: 56px; width: auto; }
         .company-name { font-size: 11pt; font-weight: 900; text-transform: uppercase; color: #111; margin-top: 4px; }
-        .company-sub  { font-size: 7.5pt; color: #faf1f1; font-style: italic; }
+        .company-sub  { font-size: 7.5pt; color: #333; font-style: italic; }
         .company-addr { font-size: 7.5pt; color: #f7f7f7; margin-top: 2px; }
 
         .doc-meta { text-align: right; }
@@ -61,6 +61,13 @@
         .montant-lettres { margin-top: 6px; border: 1px solid #ccc; padding: 5px 8px; font-size: 8.5pt; font-style: italic; }
         .montant-lettres strong { font-style: normal; }
 
+        /* ── Paiement ── */
+        .paiement { margin-top: 6px; border: 2px solid #15803d; padding: 5px 8px; font-size: 9pt; }
+        .paiement.partiel { border-color: #b45309; }
+        .paiement-titre { font-weight: 900; letter-spacing: 0.5px; color: #15803d; }
+        .paiement.partiel .paiement-titre { color: #b45309; }
+        .paiement-ligne { margin-top: 2px; }
+
         /* ── Signatures ── */
         .sig-zone { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 16px; }
         .sig-box  { border: 1px solid #ccc; padding: 6px 10px; min-height: 60px; }
@@ -94,7 +101,7 @@
         <div>
             <img src="{{ asset('logo.jpg') }}" alt="STCD" class="company-logo">
             <div class="company-name">Société de Transport en Commun de Djibouti</div>
-            <div class="company-sub">Le professionnalisme en question</div>
+            <div class="company-sub">Le professionnalisme au quotidien</div>
         </div>
         <div class="doc-meta">
             <div class="doc-city">Djibouti, le {{ $facture->date_emission->format('d/m/Y') }}</div>
@@ -118,16 +125,18 @@
                 <span class="client-lbl">DOIT :</span>
                 <span class="client-val" style="font-weight:700;">{{ $facture->payeur_nom }}</span>
             </div>
-            @if(!$facture->marque_garantie_id && $facture->client->nif)
+            {{-- NIF / RC de celui qui doit la facture (l'assurance pour un accident pris en charge) --}}
+            @php $doit = $facture->marque_garantie_id ? null : $facture->compteDebiteur(); @endphp
+            @if($doit?->nif)
             <div class="client-row">
                 <span class="client-lbl">CODE NIF :</span>
-                <span class="client-val">{{ $facture->client->nif }}</span>
+                <span class="client-val">{{ $doit->nif }}</span>
             </div>
             @endif
-            @if(!$facture->marque_garantie_id && $facture->client->rc)
+            @if($doit?->rc)
             <div class="client-row">
                 <span class="client-lbl">RC :</span>
-                <span class="client-val">{{ $facture->client->rc }}</span>
+                <span class="client-val">{{ $doit->rc }}</span>
             </div>
             @endif
             <div class="client-row">
@@ -151,9 +160,9 @@
                 <span class="client-val">{{ $or ? $or->getServiceLabel() : 'Livraison de pièces' }}</span>
             </div>
             {{-- "Propriétaire" n'est utile que si le payeur (DOIT, ci-contre) diffère du
-                 propriétaire du véhicule — cas d'une facture adressée au compte garantie
-                 constructeur. Sinon DOIT affiche déjà le même nom, pas besoin de le répéter. --}}
-            @if($facture->marque_garantie_id)
+                 propriétaire du véhicule — facture adressée au compte garantie constructeur
+                 ou à l'assurance d'un accident. Sinon DOIT affiche déjà le même nom. --}}
+            @if($facture->marque_garantie_id || $facture->assurance_id)
             <div class="client-row">
                 <span class="client-lbl">Propriétaire :</span>
                 <span class="client-val">{{ $facture->client->nom_complet }}</span>
@@ -324,6 +333,30 @@
     <div class="montant-lettres">
         <strong>La présente facture à la somme de :</strong> {{ strtoupper($facture->montantEnLettres()) }}
     </div>
+
+    {{-- ── Paiement reçu : mode(s) de paiement (Waafi, CAC, espèces…) ── --}}
+    @php $versements = $facture->statut !== 'annulee' ? $facture->versements() : collect(); @endphp
+    @if($versements->isNotEmpty())
+    @php $payee = $facture->statut === 'payee'; @endphp
+    <div class="paiement {{ $payee ? '' : 'partiel' }}">
+        <div class="paiement-titre">
+            @if($payee)
+            ✔ FACTURE PAYÉE{{ $facture->date_paiement ? ' LE ' . $facture->date_paiement->format('d/m/Y') : '' }}
+            — {{ $versements->pluck('mode')->unique()->implode(' + ') }}
+            @else
+            PAIEMENT PARTIEL — reçu {{ number_format($facture->montant_paye, 0, ',', ' ') }} FDJ, reste à payer {{ number_format($facture->getMontantRestant(), 0, ',', ' ') }} FDJ
+            @endif
+        </div>
+        @if($versements->count() > 1 || ! $payee)
+        @foreach($versements as $v)
+        <div class="paiement-ligne">• {{ $v['date']?->format('d/m/Y') }} : {{ number_format($v['montant'], 0, ',', ' ') }} FDJ — {{ $v['mode'] }}</div>
+        @endforeach
+        @endif
+        @if($facture->numero_bon_commande_client)
+        <div class="paiement-ligne">Bon de commande client n° <strong>{{ $facture->numero_bon_commande_client }}</strong></div>
+        @endif
+    </div>
+    @endif
 
     {{-- ── Signatures ── --}}
     <div class="sig-zone">

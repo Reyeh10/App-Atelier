@@ -32,7 +32,7 @@ class BonCommandeController extends Controller
     /**
      * Liste tous les bons de commande, du plus récent au plus ancien.
      */
-    public function index()
+    public function index(Request $request)
     {
         /** @var User|null $user */
         $user = Auth::user();
@@ -43,13 +43,46 @@ class BonCommandeController extends Controller
 
         $this->relancerEnvoisEnAttente();
 
-        $bons = BonCommande::with([
+        $query = BonCommande::with([
                 'ordreReparation.client', 'ordreReparation.vehicule',
                 'dossier.client', 'dossier.vehicule',
                 'devis', 'lignes', 'vehiculeDirect', 'clientDirect',
             ])
-            ->latest()
-            ->paginate(25);
+            ->latest();
+
+        // Recherche : n° de BC, n° de devis, n° d'OR, client (nom, téléphone),
+        // véhicule (immatriculation, marque, modèle) ou pièce commandée
+        if ($recherche = trim((string) $request->get('recherche'))) {
+            $query->where(function ($q) use ($recherche) {
+                $q->where('numero', 'like', "%{$recherche}%")
+                  ->orWhereHas('devis', fn ($d) => $d->where('numero', 'like', "%{$recherche}%"))
+                  ->orWhereHas('ordreReparation', fn ($o) => $o->where('numero', 'like', "%{$recherche}%"))
+                  ->orWhereHas('clientDirect', fn ($c) => $c->where('nom', 'like', "%{$recherche}%")
+                      ->orWhere('prenom', 'like', "%{$recherche}%")
+                      ->orWhere('raison_sociale', 'like', "%{$recherche}%")
+                      ->orWhere('telephone', 'like', "%{$recherche}%"))
+                  ->orWhereHas('ordreReparation.client', fn ($c) => $c->where('nom', 'like', "%{$recherche}%")
+                      ->orWhere('prenom', 'like', "%{$recherche}%")
+                      ->orWhere('raison_sociale', 'like', "%{$recherche}%")
+                      ->orWhere('telephone', 'like', "%{$recherche}%"))
+                  ->orWhereHas('dossier.client', fn ($c) => $c->where('nom', 'like', "%{$recherche}%")
+                      ->orWhere('prenom', 'like', "%{$recherche}%")
+                      ->orWhere('raison_sociale', 'like', "%{$recherche}%")
+                      ->orWhere('telephone', 'like', "%{$recherche}%"))
+                  ->orWhereHas('vehiculeDirect', fn ($v) => $v->where('immatriculation', 'like', "%{$recherche}%")
+                      ->orWhere('marque', 'like', "%{$recherche}%")
+                      ->orWhere('modele', 'like', "%{$recherche}%"))
+                  ->orWhereHas('ordreReparation.vehicule', fn ($v) => $v->where('immatriculation', 'like', "%{$recherche}%")
+                      ->orWhere('marque', 'like', "%{$recherche}%")
+                      ->orWhere('modele', 'like', "%{$recherche}%"))
+                  ->orWhereHas('dossier.vehicule', fn ($v) => $v->where('immatriculation', 'like', "%{$recherche}%")
+                      ->orWhere('marque', 'like', "%{$recherche}%")
+                      ->orWhere('modele', 'like', "%{$recherche}%"))
+                  ->orWhereHas('lignes', fn ($l) => $l->where('designation', 'like', "%{$recherche}%"));
+            });
+        }
+
+        $bons = $query->paginate(25)->withQueryString();
 
         return view('bons-commande.index', compact('bons'));
     }

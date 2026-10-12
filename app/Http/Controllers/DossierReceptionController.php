@@ -50,6 +50,23 @@ class DossierReceptionController extends Controller
             $query->where('statut', $statut);
         }
 
+        // Recherche : n° de dossier, client (nom, téléphone), véhicule (immatriculation,
+        // marque, modèle), n° d'OR ou n° de sinistre
+        if ($recherche = trim((string) $request->get('recherche'))) {
+            $query->where(function ($q) use ($recherche) {
+                $q->where('numero', 'like', "%{$recherche}%")
+                  ->orWhere('numero_sinistre', 'like', "%{$recherche}%")
+                  ->orWhereHas('client', fn ($c) => $c->where('nom', 'like', "%{$recherche}%")
+                      ->orWhere('prenom', 'like', "%{$recherche}%")
+                      ->orWhere('raison_sociale', 'like', "%{$recherche}%")
+                      ->orWhere('telephone', 'like', "%{$recherche}%"))
+                  ->orWhereHas('vehicule', fn ($v) => $v->where('immatriculation', 'like', "%{$recherche}%")
+                      ->orWhere('marque', 'like', "%{$recherche}%")
+                      ->orWhere('modele', 'like', "%{$recherche}%"))
+                  ->orWhereHas('ordreReparation', fn ($o) => $o->where('numero', 'like', "%{$recherche}%"));
+            });
+        }
+
         $dossiers = $query->paginate(20)->withQueryString();
 
         return view('dossiers-reception.index', compact('dossiers'));
@@ -158,6 +175,14 @@ class DossierReceptionController extends Controller
             'urgence'                => ['required', 'in:normal,urgent,tres_urgent'],
             'notes_internes'         => ['nullable', 'string'],
             'dommages_carrosserie'   => ['nullable', 'string'],
+            // Accident : l'assurance qui paie (client de type « assurance ») et le n° de sinistre
+            'payeur'                 => ['nullable', 'in:client,assurance'],
+            'assurance_id'           => [
+                \Illuminate\Validation\Rule::requiredIf(fn () => $request->input('motif_visite') === 'accident' && $request->input('payeur') === 'assurance'),
+                'nullable',
+                \Illuminate\Validation\Rule::exists('clients', 'id')->where('type', 'assurance'),
+            ],
+            'numero_sinistre'        => ['nullable', 'string', 'max:100'],
             'signature_client'       => ['boolean'],
             'photos_vehicule'        => ['required', 'array', 'min:1', 'max:10'],
             'photos_vehicule.*'      => ['file', 'mimes:jpg,jpeg,png,webp', 'max:8192'],
@@ -188,6 +213,12 @@ class DossierReceptionController extends Controller
         }
 
         $data['equipements'] = $request->input('equipements', []);
+
+        // Payeur : l'assurance seulement pour un accident où « Assurance » est choisi
+        $parAssurance = $data['motif_visite'] === 'accident' && ($data['payeur'] ?? 'client') === 'assurance';
+        $data['assurance_id']    = $parAssurance ? $data['assurance_id'] : null;
+        $data['numero_sinistre'] = $parAssurance ? ($data['numero_sinistre'] ?? null) : null;
+        unset($data['payeur']);
 
         if (!empty($data['dommages_carrosserie'])) {
             $decoded = json_decode($data['dommages_carrosserie'], true);
@@ -282,6 +313,50 @@ class DossierReceptionController extends Controller
                 . ($devisAvance ? " Le devis en avance {$devisAvance->numero} a été repris." : ''));
 
         return $alertePalier ? $redirection->with('error', $alertePalier) : $redirection;
+    }
+
+    /**
+     * Accident : choisit qui paie — le client ou une assurance (client de type
+     * « assurance ») avec le n° de sinistre. Le véhicule reste au client. Une fois
+     * l'OR créé, le payeur se change depuis l'OR (jusqu'à la facture).
+     */
+    public function changerPayeur(Request $request, DossierReception $dossier)
+    {
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->hasPermission('creer_dossiers')) {
+            abort(403);
+        }
+        if ($dossier->motif_visite !== 'accident') {
+            return back()->with('error', "Le payeur ne se choisit que pour un accident.");
+        }
+        if ($dossier->or_id) {
+            return back()->with('error', "L'OR est déjà créé : changez le payeur depuis la fiche de l'OR.");
+        }
+
+        $data = $request->validate([
+            'payeur'          => ['required', 'in:client,assurance'],
+            'assurance_id'    => [
+                \Illuminate\Validation\Rule::requiredIf(fn () => $request->input('payeur') === 'assurance'),
+                'nullable',
+                \Illuminate\Validation\Rule::exists('clients', 'id')->where('type', 'assurance'),
+            ],
+            'numero_sinistre' => ['nullable', 'string', 'max:100'],
+        ], [
+            'assurance_id.required' => "Choisissez l'assurance qui paie.",
+            'assurance_id.exists'   => "Ce client n'est pas une assurance.",
+        ]);
+        $parAssurance = $data['payeur'] === 'assurance';
+        $payeur = [
+            'assurance_id'    => $parAssurance ? $data['assurance_id'] : null,
+            'numero_sinistre' => $parAssurance ? ($data['numero_sinistre'] ?? null) : null,
+        ];
+
+        $dossier->update($payeur);
+        Activite::journaliser('changer_payeur', "Dossier {$dossier->numero} : payé par " . ($parAssurance ? "l'assurance " . $dossier->fresh()->assurance?->nom_complet : 'le client'), $dossier);
+
+        return back()->with('success', 'Payeur enregistré.');
     }
 
     /**

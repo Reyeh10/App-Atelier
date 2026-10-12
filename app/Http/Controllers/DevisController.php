@@ -85,17 +85,49 @@ class DevisController extends Controller
     /**
      * Liste tous les devis.
      */
-    public function index(): View
+    public function index(Request $request): View
     {
-        $devis = Devis::query()
+        $query = Devis::query()
             ->with([
                 'ordreReparation.client',
                 'ordreReparation.vehicule',
                 'dossier.client',
                 'dossier.vehicule',
             ])
-            ->latest()
-            ->paginate(25);
+            ->latest();
+
+        // Recherche : n° de devis, client (nom, téléphone), véhicule (immatriculation,
+        // marque, modèle), n° d'OR ou de dossier
+        if ($recherche = trim((string) $request->get('recherche'))) {
+            $query->where(function ($q) use ($recherche) {
+                $q->where('numero', 'like', "%{$recherche}%")
+                  ->orWhereHas('client', fn ($c) => $c->where('nom', 'like', "%{$recherche}%")
+                      ->orWhere('prenom', 'like', "%{$recherche}%")
+                      ->orWhere('raison_sociale', 'like', "%{$recherche}%")
+                      ->orWhere('telephone', 'like', "%{$recherche}%"))
+                  ->orWhereHas('ordreReparation.client', fn ($c) => $c->where('nom', 'like', "%{$recherche}%")
+                      ->orWhere('prenom', 'like', "%{$recherche}%")
+                      ->orWhere('raison_sociale', 'like', "%{$recherche}%")
+                      ->orWhere('telephone', 'like', "%{$recherche}%"))
+                  ->orWhereHas('dossier.client', fn ($c) => $c->where('nom', 'like', "%{$recherche}%")
+                      ->orWhere('prenom', 'like', "%{$recherche}%")
+                      ->orWhere('raison_sociale', 'like', "%{$recherche}%")
+                      ->orWhere('telephone', 'like', "%{$recherche}%"))
+                  ->orWhereHas('vehicule', fn ($v) => $v->where('immatriculation', 'like', "%{$recherche}%")
+                      ->orWhere('marque', 'like', "%{$recherche}%")
+                      ->orWhere('modele', 'like', "%{$recherche}%"))
+                  ->orWhereHas('ordreReparation.vehicule', fn ($v) => $v->where('immatriculation', 'like', "%{$recherche}%")
+                      ->orWhere('marque', 'like', "%{$recherche}%")
+                      ->orWhere('modele', 'like', "%{$recherche}%"))
+                  ->orWhereHas('dossier.vehicule', fn ($v) => $v->where('immatriculation', 'like', "%{$recherche}%")
+                      ->orWhere('marque', 'like', "%{$recherche}%")
+                      ->orWhere('modele', 'like', "%{$recherche}%"))
+                  ->orWhereHas('ordreReparation', fn ($o) => $o->where('numero', 'like', "%{$recherche}%"))
+                  ->orWhereHas('dossier', fn ($d) => $d->where('numero', 'like', "%{$recherche}%"));
+            });
+        }
+
+        $devis = $query->paginate(25)->withQueryString();
 
         return view(
             'devis.index',
@@ -521,6 +553,11 @@ class DevisController extends Controller
                 |--------------------------------------------------------------------------
                 */
 
+                // Prix des pièces déjà connus (venus du magasin ou saisis à la main),
+                // repris pour les lignes recréées — le formulaire ne les impose pas
+                $prixConnus = $devis->lignes()->where('type', 'piece')->get()
+                    ->mapWithKeys(fn (LigneDevis $l) => [$l->designation => $l])->all();
+
                 $devis
                     ->lignes()
                     ->delete();
@@ -536,7 +573,8 @@ class DevisController extends Controller
                     $request->input(
                         'lignes',
                         []
-                    )
+                    ),
+                    $prixConnus
                 );
 
                 /*
@@ -1267,6 +1305,11 @@ class DevisController extends Controller
                     'min:0',
                     'max:100',
                 ],
+
+                'lignes.*.prix_manuel' => [
+                    'nullable',
+                    'boolean',
+                ],
             ],
             [
                 'lignes.required' =>
@@ -1330,16 +1373,32 @@ class DevisController extends Controller
      */
     private function creerLignesDevis(
         Devis $devis,
-        array $lignes
+        array $lignes,
+        array $prixConnus = []
     ): void {
-        $lignesCalc = array_map(function ($ligne) {
+        $prixSaisissable = $devis->estLibre();
+
+        $lignesCalc = array_map(function ($ligne) use ($prixSaisissable, $prixConnus) {
             $quantite     = (float) ($ligne['quantite'] ?? 0);
             $prixUnitaire = (float) ($ligne['prix_unitaire'] ?? 0);
             $remise       = (float) ($ligne['remise'] ?? 0);
+            $prixManuel   = false;
+
+            // Pièce : le prix vient du magasin. Seul un devis sans réception permet
+            // de le saisir à la main (case « Saisir le prix ») ; sinon on garde le
+            // prix déjà connu pour cette pièce (0 tant que le magasin n'a pas répondu).
+            if (($ligne['type'] ?? null) === 'piece') {
+                $prixManuel = $prixSaisissable && filter_var($ligne['prix_manuel'] ?? false, FILTER_VALIDATE_BOOLEAN);
+                if (! $prixManuel) {
+                    $connue       = $prixConnus[$ligne['designation'] ?? ''] ?? null;
+                    $prixUnitaire = $connue && ! $connue->prix_manuel ? (float) $connue->prix_unitaire : 0.0;
+                }
+            }
 
             return array_merge($ligne, [
                 'quantite'      => $quantite,
                 'prix_unitaire' => $prixUnitaire,
+                'prix_manuel'   => $prixManuel,
                 'remise'        => $remise,
                 'total_ht'      => round($quantite * $prixUnitaire * (1 - $remise / 100), 2),
             ]);
@@ -1357,6 +1416,7 @@ class DevisController extends Controller
                 'reference'     => $reference,
                 'quantite'      => $ligne['quantite'],
                 'prix_unitaire' => $ligne['prix_unitaire'],
+                'prix_manuel'   => $ligne['prix_manuel'],
                 'remise'        => $ligne['remise'],
                 'total_ht'      => $ligne['total_ht'],
             ]);

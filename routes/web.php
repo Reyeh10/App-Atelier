@@ -15,7 +15,6 @@ use App\Http\Controllers\DevisController;
 use App\Http\Controllers\DossierReceptionController;
 use App\Http\Controllers\EncaissementGlobalController;
 use App\Http\Controllers\FactureController;
-use App\Http\Controllers\FlotteController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\OrdreReparationController;
 use App\Http\Controllers\PermissionController;
@@ -34,6 +33,9 @@ use Illuminate\Support\Facades\Route;
 Route::get('/', fn() => redirect()->route('login'));
 
 // ── Visiteurs non connectés ────────────────────────────────────
+// Manifeste de l'application (iPad / iPhone : ajout à l'écran d'accueil pour les notifications)
+Route::get('/manifest.webmanifest', [NotificationController::class, 'manifeste'])->name('manifeste');
+
 Route::middleware('guest')->group(function () {
     Route::get('/login',  [LoginController::class, 'showLoginForm'])->name('login');
     Route::post('/login', [LoginController::class, 'login'])->middleware('throttle:5,5');
@@ -55,6 +57,10 @@ Route::middleware('auth')->group(function () {
     // ── Notifications ───────────────────────────────────────────
     Route::get('/notifications/{notification}/ouvrir', [NotificationController::class, 'ouvrir'])->name('notifications.ouvrir');
     Route::post('/notifications/tout-marquer-lu', [NotificationController::class, 'toutMarquerLu'])->name('notifications.tout-marquer-lu');
+    Route::patch('/factures/{facture}/mode-paiement', [\App\Http\Controllers\FactureController::class, 'changerModePaiement'])->name('factures.mode-paiement');
+    Route::get('/notifications/nouvelles', [NotificationController::class, 'nouvelles'])->name('notifications.nouvelles');
+    Route::post('/notifications/push/abonner', [NotificationController::class, 'abonner'])->name('notifications.push.abonner');
+    Route::post('/notifications/push/desabonner', [NotificationController::class, 'desabonner'])->name('notifications.push.desabonner');
 
     // ── Profil personnel (tout compte connecté) ────────────────
     Route::get('/profil',              [ProfilController::class, 'edit'])->name('profil.edit');
@@ -134,6 +140,8 @@ Route::middleware('auth')->group(function () {
         Route::get('/dossiers-reception/create', [DossierReceptionController::class, 'create'])->name('dossiers-reception.create');
         Route::post('/dossiers-reception',        [DossierReceptionController::class, 'store'])->name('dossiers-reception.store');
         Route::patch('/dossiers-reception/{dossier}/upload-fiche', [DossierReceptionController::class, 'uploadFicheSignee'])->name('dossiers-reception.upload-fiche');
+        // Accident : qui paie (client ou assurance)
+        Route::patch('/dossiers-reception/{dossier}/payeur',       [DossierReceptionController::class, 'changerPayeur'])->name('dossiers-reception.payeur');
     });
     Route::middleware('perm:voir_dossiers')->group(function () {
         Route::get('/dossiers-reception',            [DossierReceptionController::class, 'index'])->name('dossiers-reception.index');
@@ -213,6 +221,8 @@ Route::middleware('auth')->group(function () {
         // perm:gerer_ordres ici, sinon le réceptionniste ne pourrait pas uploader
         // ses propres fiches signées (réception ou restitution).
         Route::patch('/ordres-reparations/{ordresReparation}/upload-fiche',             [OrdreReparationController::class, 'uploadFicheSignee'])->name('ordres-reparations.upload-fiche');
+        // Accident : qui paie (client ou assurance), jusqu'à la facture
+        Route::patch('/ordres-reparations/{ordresReparation}/payeur',                   [OrdreReparationController::class, 'changerPayeur'])->name('ordres-reparations.payeur');
         Route::patch('/ordres-reparations/{ordresReparation}/upload-fiche-restitution', [OrdreReparationController::class, 'uploadFicheSigneeRestitution'])->name('ordres-reparations.upload-fiche-restitution');
     });
 
@@ -310,19 +320,62 @@ Route::middleware('auth')->group(function () {
         });
     });
 
-    // ── Flotte : pièces livrées sans passage au garage (import Excel → BC → BT → facture) ──
-    Route::middleware('perm:creer_factures')->group(function () {
-        Route::get('/flotte/importer',                         [FlotteController::class, 'importerForm'])->name('flotte.importer.form');
-        Route::get('/flotte/modele',                           [FlotteController::class, 'modele'])->name('flotte.modele');
-        Route::post('/flotte/importer/apercu',                 [FlotteController::class, 'apercu'])->name('flotte.importer.apercu');
-        Route::post('/flotte/importer',                        [FlotteController::class, 'importer'])->name('flotte.importer');
-        Route::get('/flotte/livraisons/{livraison}/facturer',  [FlotteController::class, 'facturerForm'])->name('flotte.facturer.form');
-        Route::post('/flotte/livraisons/{livraison}/facturer', [FlotteController::class, 'facturer'])->name('flotte.facturer');
-    });
-    Route::middleware('perm:voir_factures')->group(function () {
-        Route::get('/flotte',          [FlotteController::class, 'index'])->name('flotte.index');
-        Route::get('/flotte/rapport',  [FlotteController::class, 'rapport'])->name('flotte.rapport');
-        Route::get('/flotte/{import}', [FlotteController::class, 'show'])->name('flotte.show')->whereNumber('import');
+    // ── Parc leasing : liste du parc (sans facture au passage) et récaps de période ──
+    // Droits vérifiés dans LeasingController : listes = administrateur, récaps = caissière
+    Route::group([], function () {
+        Route::get('/leasing',                          [\App\Http\Controllers\LeasingController::class, 'index'])->name('leasing.index');
+        Route::post('/leasing',                         [\App\Http\Controllers\LeasingController::class, 'store'])->name('leasing.store');
+        Route::delete('/leasing/{vehiculeLeasing}',     [\App\Http\Controllers\LeasingController::class, 'destroy'])->name('leasing.destroy');
+        Route::get('/leasing/recaps',                   [\App\Http\Controllers\LeasingController::class, 'recaps'])->name('leasing.recaps');
+        Route::post('/leasing/recaps',                  [\App\Http\Controllers\LeasingController::class, 'generer'])->name('leasing.recaps.generer');
+        Route::get('/leasing/recaps/{recap}',           [\App\Http\Controllers\LeasingController::class, 'show'])->name('leasing.recaps.show');
+        Route::get('/leasing/recaps/{recap}/imprimer',  [\App\Http\Controllers\LeasingController::class, 'imprimer'])->name('leasing.recaps.imprimer');
+        Route::get('/leasing/recaps/{recap}/excel',     [\App\Http\Controllers\LeasingController::class, 'exporter'])->name('leasing.recaps.excel');
+        // Leasing tiers : véhicules de particuliers loués à STCD
+        // ── Véhicules de service (affectés à un service / un directeur) : même logique que le parc STCD ──
+        Route::get('/vehicules-service',                      [\App\Http\Controllers\LeasingController::class, 'index'])->defaults('categorie', 'service')->name('vehicules-service.index');
+        Route::post('/vehicules-service',                     [\App\Http\Controllers\LeasingController::class, 'store'])->defaults('categorie', 'service')->name('vehicules-service.store');
+        Route::patch('/vehicules-service/{vehiculeLeasing}',  [\App\Http\Controllers\LeasingController::class, 'changerAffectation'])->whereNumber('vehiculeLeasing')->defaults('categorie', 'service')->name('vehicules-service.affectation');
+        Route::delete('/vehicules-service/{vehiculeLeasing}', [\App\Http\Controllers\LeasingController::class, 'destroy'])->whereNumber('vehiculeLeasing')->defaults('categorie', 'service')->name('vehicules-service.destroy');
+        Route::get('/vehicules-service/modele-liste',         [\App\Http\Controllers\LeasingController::class, 'modeleParc'])->defaults('categorie', 'service')->name('vehicules-service.parc.modele');
+        Route::post('/vehicules-service/liste/apercu',        [\App\Http\Controllers\LeasingController::class, 'apercuParc'])->defaults('categorie', 'service')->name('vehicules-service.parc.apercu');
+        Route::post('/vehicules-service/liste/importer',      [\App\Http\Controllers\LeasingController::class, 'importerParc'])->defaults('categorie', 'service')->name('vehicules-service.parc.importer');
+        Route::get('/leasing/modele-liste',                   [\App\Http\Controllers\LeasingController::class, 'modeleParc'])->name('leasing.parc.modele');
+        Route::post('/leasing/liste/apercu',                  [\App\Http\Controllers\LeasingController::class, 'apercuParc'])->name('leasing.parc.apercu');
+        Route::post('/leasing/liste/importer',                [\App\Http\Controllers\LeasingController::class, 'importerParc'])->name('leasing.parc.importer');
+        Route::get('/vehicules-service/recaps',               [\App\Http\Controllers\LeasingController::class, 'recapsService'])->name('vehicules-service.recaps');
+        Route::patch('/leasing/{vehiculeLeasing}/proprietaire', [\App\Http\Controllers\LeasingController::class, 'changerAffectation'])->whereNumber('vehiculeLeasing')->name('leasing.affectation');
+
+        Route::get('/leasing-tiers/recaps',             [\App\Http\Controllers\LeasingController::class, 'recapsTiers'])->name('leasing-tiers.recaps');
+        Route::patch('/clients/{client}/leasing-tiers', [\App\Http\Controllers\LeasingController::class, 'vehiculesTiers'])->name('leasing-tiers.vehicules');
+        Route::get('/leasing/recaps/{recap}/client/{client}', [\App\Http\Controllers\LeasingController::class, 'imprimerClient'])->name('leasing.recaps.client');
+
+        // ── Bus leasing : bus réparés dans un autre garage, BC directs, récap mensuel (pas de facture) ──
+        // Droits vérifiés dans le contrôleur : liste des bus → administrateur ; BC → gestion des BC ; récaps → caissière
+        Route::get('/leasing-bus',                      [\App\Http\Controllers\BusLeasingController::class, 'index'])->name('leasing-bus.index');
+        Route::get('/leasing-bus/modele-liste',         [\App\Http\Controllers\BusLeasingController::class, 'modeleParc'])->name('leasing-bus.parc.modele');
+        Route::post('/leasing-bus/liste/apercu',        [\App\Http\Controllers\BusLeasingController::class, 'apercuParc'])->name('leasing-bus.parc.apercu');
+        Route::post('/leasing-bus/liste/importer',      [\App\Http\Controllers\BusLeasingController::class, 'importerParc'])->name('leasing-bus.parc.importer');
+        Route::delete('/leasing-bus/{vehiculeLeasing}', [\App\Http\Controllers\BusLeasingController::class, 'destroy'])->whereNumber('vehiculeLeasing')->name('leasing-bus.destroy');
+        Route::get('/leasing-bus/bons-commande/creer',  [\App\Http\Controllers\BusLeasingController::class, 'creerBc'])->name('leasing-bus.bc.create');
+        Route::post('/leasing-bus/bons-commande',       [\App\Http\Controllers\BusLeasingController::class, 'enregistrerBc'])->name('leasing-bus.bc.store');
+        Route::get('/leasing-bus/modele-pieces',        [\App\Http\Controllers\BusLeasingController::class, 'modeleBc'])->name('leasing-bus.bc.modele');
+        Route::post('/leasing-bus/bons-commande/apercu',   [\App\Http\Controllers\BusLeasingController::class, 'apercuBc'])->name('leasing-bus.bc.apercu');
+        Route::post('/leasing-bus/bons-commande/importer', [\App\Http\Controllers\BusLeasingController::class, 'importerBc'])->name('leasing-bus.bc.importer');
+        Route::get('/leasing-bus/recaps',               [\App\Http\Controllers\LeasingController::class, 'recapsBus'])->name('leasing-bus.recaps');
+
+        // ── Bus du transport public : même fonctionnement que le bus leasing, liste et récap à part ──
+        Route::get('/bus-transport',                      [\App\Http\Controllers\BusLeasingController::class, 'index'])->defaults('groupe', 'transport')->name('bus-transport.index');
+        Route::get('/bus-transport/modele-liste',         [\App\Http\Controllers\BusLeasingController::class, 'modeleParc'])->defaults('groupe', 'transport')->name('bus-transport.parc.modele');
+        Route::post('/bus-transport/liste/apercu',        [\App\Http\Controllers\BusLeasingController::class, 'apercuParc'])->defaults('groupe', 'transport')->name('bus-transport.parc.apercu');
+        Route::post('/bus-transport/liste/importer',      [\App\Http\Controllers\BusLeasingController::class, 'importerParc'])->defaults('groupe', 'transport')->name('bus-transport.parc.importer');
+        Route::delete('/bus-transport/{vehiculeLeasing}', [\App\Http\Controllers\BusLeasingController::class, 'destroy'])->whereNumber('vehiculeLeasing')->defaults('groupe', 'transport')->name('bus-transport.destroy');
+        Route::get('/bus-transport/bons-commande/creer',  [\App\Http\Controllers\BusLeasingController::class, 'creerBc'])->defaults('groupe', 'transport')->name('bus-transport.bc.create');
+        Route::post('/bus-transport/bons-commande',       [\App\Http\Controllers\BusLeasingController::class, 'enregistrerBc'])->defaults('groupe', 'transport')->name('bus-transport.bc.store');
+        Route::get('/bus-transport/modele-pieces',        [\App\Http\Controllers\BusLeasingController::class, 'modeleBc'])->defaults('groupe', 'transport')->name('bus-transport.bc.modele');
+        Route::post('/bus-transport/bons-commande/apercu',   [\App\Http\Controllers\BusLeasingController::class, 'apercuBc'])->defaults('groupe', 'transport')->name('bus-transport.bc.apercu');
+        Route::post('/bus-transport/bons-commande/importer', [\App\Http\Controllers\BusLeasingController::class, 'importerBc'])->defaults('groupe', 'transport')->name('bus-transport.bc.importer');
+        Route::get('/bus-transport/recaps',               [\App\Http\Controllers\LeasingController::class, 'recapsBus'])->defaults('groupe', 'transport')->name('bus-transport.recaps');
     });
 
     // ── Garanties ─────────────────────────────────────────────
@@ -360,7 +413,8 @@ Route::middleware('auth')->group(function () {
         Route::patch('/parametres/capacite',                         [ParametreAtelierController::class, 'updateCapacite'])->name('parametres.capacite.update');
         Route::patch('/parametres/tarifs',                           [ParametreAtelierController::class, 'updateTarifs'])->name('parametres.tarifs.update');
         Route::patch('/parametres/controle-qualite',                 [ParametreAtelierController::class, 'updateControleQualiteTechnicien'])->name('parametres.controle-qualite.update');
-        Route::patch('/parametres/main-oeuvre-flotte',               [ParametreAtelierController::class, 'updateMainOeuvreFlotte'])->name('parametres.main-oeuvre-flotte.update');
+        Route::patch('/parametres/forfait-leasing',                  [ParametreAtelierController::class, 'updateForfaitLeasing'])->name('parametres.forfait-leasing.update');
+        Route::patch('/parametres/forfait-bus-leasing',              [ParametreAtelierController::class, 'updateForfaitBusLeasing'])->name('parametres.forfait-bus-leasing.update');
         Route::post('/parametres/pauses',                            [ParametreAtelierController::class, 'storePause'])->name('parametres.pauses.store');
         Route::patch('/parametres/pauses/{pause}/toggle',            [ParametreAtelierController::class, 'togglePause'])->name('parametres.pauses.toggle');
         Route::delete('/parametres/pauses/{pause}',                  [ParametreAtelierController::class, 'destroyPause'])->name('parametres.pauses.destroy');

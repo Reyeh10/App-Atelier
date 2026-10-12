@@ -17,14 +17,17 @@
 
 @section('content')
 
-<form method="GET" class="flex gap-3 mb-5">
+<form method="GET" class="flex flex-wrap gap-3 mb-5">
+    <input type="text" name="recherche" value="{{ request('recherche') }}" placeholder="N° dossier, client, téléphone, immatriculation, OR, sinistre..."
+           class="flex-1 min-w-0 max-w-md px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-500">
+    <button type="submit" class="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium rounded-lg transition-colors">Rechercher</button>
     <select name="statut" onchange="this.form.submit()" class="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-500">
         <option value="">Tous les statuts</option>
         @foreach(['nouveau' => 'Nouveau', 'diagnostic' => 'Diagnostic', 'devis_en_cours' => 'Devis en cours', 'transforme_en_or' => 'Transformé en OR', 'en_attente_client' => 'En attente du client', 'annule' => 'Annulé'] as $val => $label)
             <option value="{{ $val }}" {{ request('statut') === $val ? 'selected' : '' }}>{{ $label }}</option>
         @endforeach
     </select>
-    @if(request('statut'))
+    @if(request()->anyFilled(['statut', 'recherche']))
     <a href="{{ route('dossiers-reception.index') }}" class="px-4 py-2 border border-gray-300 rounded-lg text-sm text-slate-600 hover:bg-gray-50 transition-colors">Réinitialiser</a>
     @endif
 </form>

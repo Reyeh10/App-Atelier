@@ -491,6 +491,15 @@ class ClientController extends Controller
         /** @var User|null $user */
         $user = Auth::user();
 
+        // Leasing tiers : sa partie de chaque récap (caissière et administrateur)
+        $partsLeasingTiers = $user && ($user->isAdmin() || $user->hasPermission('encaisser_factures'))
+            ? \App\Models\RecapLeasing::where('type', 'tiers')
+                ->whereHas('lignes', fn ($l) => $l->where('client_id', $client->id))
+                ->with(['lignes' => fn ($l) => $l->where('client_id', $client->id)])
+                ->orderByDesc('date_debut')->get()
+            : collect();
+        view()->share('partsLeasingTiers', $partsLeasingTiers);
+
         $lignesFacturees = collect();
         $vehiculesFiltre = collect();
 

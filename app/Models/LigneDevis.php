@@ -7,16 +7,23 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class LigneDevis extends Model
 {
+    /** Pièce en rupture au magasin : prix de vente connu, mais pas encore disponible (affiché dans le système seulement, jamais sur le devis imprimé) */
+    public function estEnRupture(): bool
+    {
+        return $this->type === 'piece' && $this->disponible === false && (float) $this->prix_unitaire > 0;
+    }
+
     protected $table = 'lignes_devis';
 
     protected $fillable = [
-        'devis_id', 'type', 'designation', 'reference', 'quantite', 'prix_unitaire', 'remise', 'total_ht',
+        'devis_id', 'type', 'designation', 'reference', 'quantite', 'prix_unitaire', 'prix_manuel', 'remise', 'total_ht',
         'disponible', 'note_fournisseur',
     ];
 
     protected $casts = [
         'quantite'      => 'decimal:2',
         'prix_unitaire' => 'decimal:2',
+        'prix_manuel'   => 'boolean',
         'remise'        => 'decimal:2',
         'total_ht'      => 'decimal:2',
         'disponible'    => 'boolean',

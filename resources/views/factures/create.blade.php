@@ -75,6 +75,9 @@
             <h3 class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">{{ $estGarantieApprouvee ? 'Propriétaire du véhicule' : 'Client facturé' }}</h3>
             <div class="bg-gray-50 rounded-xl p-4">
                 <p class="font-bold text-slate-900">{{ $or->client->nom_complet }}</p>
+                @if($or->assurance)
+                <p class="text-xs font-bold text-indigo-700 mt-1">Payée par l'assurance : {{ $or->assurance->nom_complet }}@if($or->numero_sinistre) — sinistre n° {{ $or->numero_sinistre }}@endif</p>
+                @endif
                 <p class="text-sm text-slate-500">{{ $or->client->telephone }}</p>
                 @if($or->client->email)<p class="text-sm text-slate-500">{{ $or->client->email }}</p>@endif
                 <p class="text-xs text-slate-400 mt-1">Type : <span class="font-medium">{{ $or->client->getTypeLabel() }}</span></p>

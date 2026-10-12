@@ -18,7 +18,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Vehicule extends Model
 {
     protected $fillable = [
-        'client_id', 'immatriculation', 'vin', 'marque', 'modele', 'version', 'categorie',
+        'client_id', 'immatriculation', 'vin', 'marque', 'modele', 'version', 'categorie', 'leasing_tiers',
         'annee', 'couleur', 'motorisation', 'type_moteur_id', 'cylindree', 'puissance_fiscale',
         'kilometrage', 'date_mise_circulation', 'date_expiration_assurance',
         'date_expiration_vignette', 'sous_garantie', 'fin_garantie', 'garantie_sortie_le',

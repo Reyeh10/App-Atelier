@@ -4,6 +4,17 @@
 @section('page-subtitle', 'Bons de commande envoyés au fournisseur et leur disponibilité')
 
 @section('content')
+<div class="mb-5">
+<form method="GET" action="{{ route('bons-commande.index') }}" class="flex flex-wrap gap-3 items-center">
+    <input type="text" name="recherche" value="{{ request('recherche') }}" placeholder="N° BC, devis, OR, client, immatriculation, pièce..."
+           class="flex-1 min-w-0 max-w-md px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-500">
+    <button type="submit" class="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium rounded-lg transition-colors">Rechercher</button>
+    @if(request()->filled('recherche'))
+    <a href="{{ route('bons-commande.index', request()->except('recherche', 'page')) }}" class="text-xs text-slate-400 hover:text-slate-600">✕ Effacer</a>
+    @endif
+</form>
+</div>
+
 <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
 
     <div class="px-6 py-4 border-b border-gray-100">
