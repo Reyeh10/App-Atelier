@@ -188,6 +188,8 @@
                            class="font-mono text-orange-500 hover:underline text-xs">
                             {{ $facture->ordreReparation->numero }}
                         </a>
+                        @elseif($facture->depannage_id)
+                        <a href="{{ route('depannages.show', $facture->depannage_id) }}" class="text-xs bg-orange-100 text-orange-700 font-semibold px-1.5 py-0.5 rounded hover:underline">Dépannage</a>
                         @else
                         <span class="text-xs bg-indigo-100 text-indigo-700 font-semibold px-1.5 py-0.5 rounded">Flotte</span>
                         @endif

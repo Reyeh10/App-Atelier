@@ -14,6 +14,7 @@ use App\Models\TypeMoteur;
 use App\Models\User;
 use App\Models\Vehicule;
 use App\Services\EntretienService;
+use App\Services\SignatureService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -975,6 +976,8 @@ class OrdreReparationController extends Controller
 
         $ordresReparation->update($payeur);
         $ordresReparation->dossier?->update($payeur);
+        // Majoration assurance ajoutée ou retirée sur les devis de l'OR (complémentaires compris)
+        $ordresReparation->allDevis()->get()->each->appliquerMajoration();
         Activite::journaliser('changer_payeur', "{$ordresReparation->numero} : payé par " . ($parAssurance ? "l'assurance " . $ordresReparation->fresh()->assurance?->nom_complet : 'le client'), $ordresReparation);
 
         return back()->with('success', 'Payeur enregistré.');
@@ -1171,10 +1174,14 @@ class OrdreReparationController extends Controller
             'dommages_carrosserie_sortie' => ['nullable', 'string'],
             'photos_vehicule_sortie'      => ['required', 'array', 'min:1', 'max:10'],
             'photos_vehicule_sortie.*'    => ['file', 'mimes:jpg,jpeg,png,webp', 'max:8192'],
+            'signature_restitution_image' => SignatureService::regles(),
         ], [
             'photos_vehicule_sortie.required' => 'Au moins une photo du véhicule est obligatoire à la restitution.',
             'photos_vehicule_sortie.min'       => 'Au moins une photo du véhicule est obligatoire à la restitution.',
-        ]);
+        ] + SignatureService::messages('signature_restitution_image'));
+
+        // Signature électronique du client à la restitution (obligatoire)
+        $signatureRestitution = SignatureService::enregistrer($request->signature_restitution_image, 'signature_restitution_image', $ordresReparation->numero . '-sortie');
 
         // Les équipements présents à la sortie sont cochés dans le formulaire
         $equipements = $request->input('equipements_sortie', []);
@@ -1193,7 +1200,8 @@ class OrdreReparationController extends Controller
             'equipements_sortie'      => $equipements,
             'dommages_carrosserie_sortie' => $dommagesSortie,
             'notes_restitution'       => $request->notes_restitution,
-            'signature_restitution'   => $request->boolean('signature_restitution'),
+            'signature_restitution'   => true,
+            'signature_restitution_image' => $signatureRestitution,
             'date_sortie_reelle'      => $request->date_sortie_reelle,
             'restitue_par_id'         => Auth::id(),  // Qui a effectué la restitution
             'statut'                  => 'livre',       // L'OR est clôturé

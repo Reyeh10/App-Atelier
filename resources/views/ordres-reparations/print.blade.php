@@ -71,7 +71,7 @@
         @if(request('apercu'))
         <button onclick="window.close()" style="background:#dc2626;color:#fff;border:none;padding:8px 22px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:bold;">← Fermer</button>
         @else
-        <a href="{{ route('ordres-reparations.show', $or) }}" style="background:#dc2626;color:#fff;border:none;padding:8px 22px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:bold;text-decoration:none;">← Retour</a>
+        <a href="{{ $retour ?? route('ordres-reparations.show', $or) }}" style="background:#dc2626;color:#fff;border:none;padding:8px 22px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:bold;text-decoration:none;">← Retour</a>
         @endif
         <button onclick="window.print()" style="background:#f97316;color:white;border:none;padding:8px 22px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:bold;">🖨 Imprimer</button>
     </div>
@@ -138,8 +138,9 @@
         <h3>MOTIF DE LA VISITE / RÉCLAMATION DU CLIENT</h3>
         <div class="section-body">
             <div style="display:flex;gap:6px;margin-bottom:6px;">
+                @php $typeCoche = $typeFiche ?? $or->type; @endphp
                 @foreach(['normal' => 'Normal', 'garantie' => 'Garantie', 'sinistre' => 'Sinistre', 'entretien' => 'Entretien'] as $v => $l)
-                <span style="border:1px solid #000;padding:2px 8px;font-size:10px;background:{{ $or->type === $v ? '#1e293b' : 'white' }};color:{{ $or->type === $v ? 'white' : '#000' }}">
+                <span style="border:1px solid #000;padding:2px 8px;font-size:10px;background:{{ $typeCoche === $v ? '#1e293b' : 'white' }};color:{{ $typeCoche === $v ? 'white' : '#000' }}">
                     {{ $l }}
                 </span>
                 @endforeach
@@ -299,7 +300,9 @@
         <div class="sig-box">
             <div class="sig-label">SIGNATURE DU CLIENT</div>
             <div class="sig-area">
-                @if($or->signature_client)
+                @if($or->signature_client_image)
+                    <img src="{{ asset('storage/' . $or->signature_client_image) }}" alt="Signature du client" style="max-height:60px;max-width:100%;margin-top:4px;">
+                @elseif($or->signature_client)
                     <p style="color:green;font-size:10px;padding-top:10px;">✓ Signature obtenue</p>
                 @endif
             </div>

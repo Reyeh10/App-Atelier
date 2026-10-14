@@ -22,3 +22,6 @@
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+# Sauvegardes locales des bases de donnees
+/database/backups/

@@ -183,6 +183,15 @@
                             <td class="px-3 py-3">
                                 <input type="text" name="lignes[{{ $i }}][designation]" value="{{ $ligne->designation }}"
                                        class="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-orange-500" required>
+                                @if($devis)
+                                {{-- TVA calculée devis par devis : la facture reprend exactement le total de chaque devis --}}
+                                <input type="hidden" name="lignes[{{ $i }}][devis_id]" value="{{ $devis->id }}">
+                                @endif
+                                @if($ligne->groupe)
+                                {{-- Ingrédients regroupés sur le devis : une seule ligne sur la facture imprimée --}}
+                                <input type="hidden" name="lignes[{{ $i }}][groupe]" value="{{ $ligne->groupe }}">
+                                <span class="inline-block mt-1 px-2 py-0.5 rounded-full text-[10px] font-semibold {{ $ligne->groupe === 'peinture' ? 'bg-pink-100 text-pink-700' : 'bg-amber-100 text-amber-700' }}">{{ \App\Services\GroupeIngredientsService::GROUPES[$ligne->groupe] ?? $ligne->groupe }}</span>
+                                @endif
                             </td>
                             <td class="px-3 py-3">
                                 <input type="text" name="lignes[{{ $i }}][reference]" value="{{ $ligne->reference }}"

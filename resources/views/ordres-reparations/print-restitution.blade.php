@@ -293,7 +293,13 @@
         <div class="sig-box">
             <div class="sig-label">SIGNATURE DU CLIENT</div>
             <div style="font-size:9px;color:#64748b;margin-top:4px;">Je confirme avoir récupéré mon véhicule en bon état.</div>
-            <div style="min-height:45px;border-top:1px dashed #999;margin-top:8px;"></div>
+            <div style="min-height:45px;border-top:1px dashed #999;margin-top:8px;">
+                @if($or->signature_restitution_image)
+                    <img src="{{ asset('storage/' . $or->signature_restitution_image) }}" alt="Signature du client" style="max-height:60px;max-width:100%;margin-top:4px;">
+                @elseif($or->signature_restitution)
+                    <p style="color:green;font-size:10px;padding-top:10px;">✓ Signature obtenue</p>
+                @endif
+            </div>
             <div style="font-size:9px;color:#374151;margin-top:4px;">{{ $or->client->nom_complet }}</div>
         </div>
         <div class="sig-box">

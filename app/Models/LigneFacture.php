@@ -10,7 +10,7 @@ class LigneFacture extends Model
     protected $table = 'lignes_facture';
 
     protected $fillable = [
-        'facture_id', 'type', 'designation', 'reference', 'unite', 'quantite', 'prix_unitaire', 'remise', 'total_ht',
+        'facture_id', 'type', 'designation', 'reference', 'unite', 'quantite', 'prix_unitaire', 'remise', 'total_ht', 'groupe',
     ];
 
     protected $casts = [

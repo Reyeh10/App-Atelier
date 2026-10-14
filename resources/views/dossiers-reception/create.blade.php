@@ -629,14 +629,11 @@
                       placeholder="Instructions spéciales, remarques internes...">{{ old('notes_internes') }}</textarea>
         </div>
 
-        <div class="flex items-center gap-3 p-4 bg-blue-50 border border-blue-200 rounded-xl">
-            <input type="checkbox" name="signature_client" value="1" id="signature_client"
-                   {{ old('signature_client') ? 'checked' : '' }}
-                   class="w-5 h-5 text-blue-500 border-gray-300 rounded focus:ring-blue-500">
-            <label for="signature_client" class="text-sm text-blue-800 cursor-pointer">
-                <span class="font-semibold">Signature du client obtenue</span> — Le client a été informé de l'état du véhicule à la réception et a signé la fiche physique.
-            </label>
-        </div>
+        @include('partials.signature-pad', [
+            'nom'   => 'signature_client_image',
+            'titre' => 'Signature du client',
+            'texte' => "Je confirme avoir été informé(e) de l'état du véhicule à la réception, tel que décrit sur cette fiche.",
+        ])
     </div>
 </div>
 

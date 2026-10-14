@@ -27,7 +27,7 @@ class BonCommande extends Model
 {
     protected $table = 'bons_commande';
 
-    protected $fillable = ['numero', 'devis_id', 'or_id', 'dossier_id', 'client_id', 'vehicule_id', 'leasing_bus', 'statut', 'notes', 'fournisseur_repondu_at'];
+    protected $fillable = ['numero', 'devis_id', 'or_id', 'dossier_id', 'client_id', 'vehicule_id', 'leasing_bus', 'depannage_id', 'statut', 'notes', 'fournisseur_repondu_at'];
 
     protected $casts = [
         'fournisseur_repondu_at' => 'datetime',
@@ -68,6 +68,12 @@ class BonCommande extends Model
     public function bonTransfert(): \Illuminate\Database\Eloquent\Relations\HasOne
     {
         return $this->hasOne(BonTransfert::class);
+    }
+
+    /** Dépannage (pièces sans réception ni devis) à l'origine du BC */
+    public function depannage(): BelongsTo
+    {
+        return $this->belongsTo(Depannage::class);
     }
 
     /** Véhicule porté directement par le BC (BC flotte, sans devis) */

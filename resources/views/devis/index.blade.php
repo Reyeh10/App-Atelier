@@ -19,6 +19,15 @@
 <div class="bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-sm text-green-700">{{ session('success') }}</div>
 @endif
 
+<form method="GET" action="{{ route('devis.index') }}" class="flex flex-wrap gap-3 items-center">
+    <input type="text" name="recherche" value="{{ request('recherche') }}" placeholder="N° devis, client, téléphone, immatriculation, OR, dossier..."
+           class="flex-1 min-w-0 max-w-md px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-500">
+    <button type="submit" class="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium rounded-lg transition-colors">Rechercher</button>
+    @if(request()->filled('recherche'))
+    <a href="{{ route('devis.index', request()->except('recherche', 'page')) }}" class="text-xs text-slate-400 hover:text-slate-600">✕ Effacer</a>
+    @endif
+</form>
+
 <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
     <div class="overflow-x-auto">
         <table class="w-full text-sm">

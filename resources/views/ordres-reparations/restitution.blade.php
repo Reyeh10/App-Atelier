@@ -409,14 +409,11 @@
                       placeholder="Ex: véhicule nettoyé, nouvelle rayure sur aile avant constatée...">{{ old('notes_restitution') }}</textarea>
         </div>
 
-        <div class="flex items-center gap-3 p-4 bg-green-50 border border-green-200 rounded-xl">
-            <input type="checkbox" name="signature_restitution" value="1" id="signature_restitution"
-                   {{ old('signature_restitution') ? 'checked' : '' }}
-                   class="w-5 h-5 text-green-500 border-gray-300 rounded focus:ring-green-500">
-            <label for="signature_restitution" class="text-sm text-green-800 cursor-pointer">
-                <span class="font-semibold">Signature du client obtenue à la restitution</span> — Le client a vérifié l'état du véhicule et a signé la fiche de restitution.
-            </label>
-        </div>
+        @include('partials.signature-pad', [
+            'nom'   => 'signature_restitution_image',
+            'titre' => 'Signature du client à la restitution',
+            'texte' => "Je confirme avoir vérifié l'état du véhicule et l'avoir récupéré.",
+        ])
     </div>
 </div>
 

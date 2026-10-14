@@ -91,6 +91,15 @@
                        class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
             </div>
 
+            {{-- Assurance : majoration des devis d'accident qu'elle paie (invisible pour le client) --}}
+            <div class="field-assurance hidden col-span-2">
+                <label class="block text-sm font-medium text-slate-700 mb-1.5">Taux de majoration accident (%)</label>
+                <input type="number" name="taux_majoration" min="0" max="100" step="0.01"
+                       value="{{ old('taux_majoration', $client?->taux_majoration !== null ? (float) $client->taux_majoration : ($client?->exists ? '' : (float) \App\Models\ParametreAtelier::get()->taux_majoration_assurance)) }}"
+                       class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 @error('taux_majoration') border-red-400 @enderror">
+                <p class="text-xs text-slate-400 mt-1">Pièces et main-d'œuvre des devis d'accident payés par cette assurance sont majorées de ce taux. Vide = taux par défaut des Paramètres ({{ rtrim(rtrim(number_format((float) \App\Models\ParametreAtelier::get()->taux_majoration_assurance, 2, ',', ' '), '0'), ',') }} %).</p>
+            </div>
+
             {{-- Contact commun --}}
             <div>
                 <label class="block text-sm font-medium text-slate-700 mb-1.5">

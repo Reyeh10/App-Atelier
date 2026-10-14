@@ -65,6 +65,8 @@
         </div>
     </div>
 
+    @include('devis._groupes-ingredients')
+
     <div class="overflow-x-auto">
         <table class="w-full text-sm" id="table-lignes">
             <thead>

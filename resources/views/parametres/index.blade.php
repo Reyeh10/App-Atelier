@@ -475,6 +475,27 @@ $nomsJours = [
         </form>
     </div>
 
+    {{-- ── Majoration accident payé par une assurance ───────────── --}}
+    <div class="mt-6 bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-700 overflow-hidden">
+        <div class="px-6 py-4 border-b border-gray-100 dark:border-slate-700">
+            <h2 class="font-semibold text-slate-800 dark:text-slate-100">Majoration accident (assurance)</h2>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Accident payé par une assurance : pièces et main-d'œuvre du devis majorées automatiquement, sans ligne visible. Taux par défaut ; une assurance peut avoir son propre taux sur sa fiche client.</p>
+        </div>
+        <form method="POST" action="{{ route('parametres.majoration-assurance.update') }}" class="px-6 py-4 flex gap-3 items-end">
+            @csrf @method('PATCH')
+            <div class="flex-1">
+                <label class="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Taux par défaut (%)</label>
+                <input type="number" name="taux_majoration_assurance" min="0" max="100" step="0.01" required
+                       value="{{ old('taux_majoration_assurance', (float) $parametreAtelier->taux_majoration_assurance) }}"
+                       class="w-full px-3 py-2.5 border border-gray-300 dark:border-slate-600 rounded-xl text-sm
+                              bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            </div>
+            <button type="submit" class="px-6 py-2.5 bg-indigo-500 hover:bg-indigo-600 text-white text-sm font-semibold rounded-xl transition-colors">
+                Enregistrer
+            </button>
+        </form>
+    </div>
+
     {{-- ── Catalogue Services Rapides ("Autre") ──────────────────── --}}
     <div class="mt-6 bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-700 overflow-hidden">
         <div class="px-6 py-4 border-b border-gray-100 dark:border-slate-700 flex items-center gap-3">
