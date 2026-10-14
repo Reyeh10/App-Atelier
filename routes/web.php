@@ -12,6 +12,7 @@ use App\Http\Controllers\ClientController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DevisAvanceController;
 use App\Http\Controllers\DevisController;
+use App\Http\Controllers\DepannageController;
 use App\Http\Controllers\DossierReceptionController;
 use App\Http\Controllers\EncaissementGlobalController;
 use App\Http\Controllers\FactureController;
@@ -105,7 +106,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/api/clients/{client}/vehicules', function (\App\Models\Client $client) {
         return response()->json(
             $client->vehicules()
-                ->get(['id', 'immatriculation', 'marque', 'modele', 'vin', 'kilometrage', 'sous_garantie', 'categorie', 'date_mise_circulation', 'garantie_sortie_le', 'type_moteur_id'])
+                ->get(['id', 'immatriculation', 'marque', 'modele', 'vin', 'kilometrage', 'sous_garantie', 'categorie', 'date_mise_circulation', 'garantie_sortie_le', 'type_moteur_id', 'leasing_tiers'])
                 ->map(fn ($v) => [
                     'id'                 => $v->id,
                     'immatriculation'    => $v->immatriculation,
@@ -126,6 +127,8 @@ Route::middleware('auth')->group(function () {
                     'garantie_sortie'    => $v->sous_garantie && ! $v->estEligibleGarantie(),
                     'garantie_motif'     => $v->getMotifSortieGarantieLabel(),
                     'limite_km_garantie' => $v->limite_km_garantie,
+                    // Liste leasing (parc, tiers, service, bus) : pas de facture, pièces au récap
+                    'leasing'            => \App\Models\Depannage::vehiculeEnLeasing($v),
                 ])
         );
     })->name('api.client.vehicules')->middleware('perm:voir_vehicules');
@@ -146,6 +149,7 @@ Route::middleware('auth')->group(function () {
     Route::middleware('perm:voir_dossiers')->group(function () {
         Route::get('/dossiers-reception',            [DossierReceptionController::class, 'index'])->name('dossiers-reception.index');
         Route::get('/dossiers-reception/{dossier}',  [DossierReceptionController::class, 'show'])->name('dossiers-reception.show');
+        Route::get('/dossiers-reception/{dossier}/imprimer', [DossierReceptionController::class, 'imprimer'])->name('dossiers-reception.imprimer');
         Route::delete('/dossiers-reception/{dossier}', [DossierReceptionController::class, 'destroy'])->name('dossiers-reception.destroy');
     });
     Route::middleware('perm:gerer_devis')->group(function () {
@@ -153,6 +157,17 @@ Route::middleware('auth')->group(function () {
         Route::post('/dossiers-reception/{dossier}/devis',      [DevisController::class, 'storePourDossier'])->name('dossiers-reception.devis.store');
         Route::patch('/dossiers-reception/{dossier}/diagnostic', [DossierReceptionController::class, 'diagnostiquer'])->name('dossiers-reception.diagnostiquer');
     });
+
+    // ── Dépannage (pièces + main-d'œuvre sans réception ni devis) ──
+    Route::middleware('perm:creer_depannages')->group(function () {
+        Route::get('/depannages/create', [DepannageController::class, 'create'])->name('depannages.create');
+        Route::post('/depannages',       [DepannageController::class, 'store'])->name('depannages.store');
+    });
+    Route::middleware('perm:voir_depannages')->group(function () {
+        Route::get('/depannages',              [DepannageController::class, 'index'])->name('depannages.index');
+        Route::get('/depannages/{depannage}',  [DepannageController::class, 'show'])->name('depannages.show');
+    });
+    Route::post('/depannages/{depannage}/facturer', [DepannageController::class, 'facturer'])->name('depannages.facturer')->middleware('perm:creer_factures');
 
     // ── Réservations (RDV Service Rapide) ──────────────────────
     Route::middleware('perm:gerer_reservations')->group(function () {
@@ -415,6 +430,7 @@ Route::middleware('auth')->group(function () {
         Route::patch('/parametres/controle-qualite',                 [ParametreAtelierController::class, 'updateControleQualiteTechnicien'])->name('parametres.controle-qualite.update');
         Route::patch('/parametres/forfait-leasing',                  [ParametreAtelierController::class, 'updateForfaitLeasing'])->name('parametres.forfait-leasing.update');
         Route::patch('/parametres/forfait-bus-leasing',              [ParametreAtelierController::class, 'updateForfaitBusLeasing'])->name('parametres.forfait-bus-leasing.update');
+        Route::patch('/parametres/majoration-assurance',             [ParametreAtelierController::class, 'updateMajorationAssurance'])->name('parametres.majoration-assurance.update');
         Route::post('/parametres/pauses',                            [ParametreAtelierController::class, 'storePause'])->name('parametres.pauses.store');
         Route::patch('/parametres/pauses/{pause}/toggle',            [ParametreAtelierController::class, 'togglePause'])->name('parametres.pauses.toggle');
         Route::delete('/parametres/pauses/{pause}',                  [ParametreAtelierController::class, 'destroyPause'])->name('parametres.pauses.destroy');

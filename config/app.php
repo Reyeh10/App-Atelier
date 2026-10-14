@@ -129,6 +129,6 @@ return [
     | envoi du 30/09/2026, déployé le 05/10/2026).
     */
 
-    'version' => '4',
+    'version' => '5',
 
 ];

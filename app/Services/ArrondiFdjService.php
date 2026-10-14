@@ -85,6 +85,31 @@ class ArrondiFdjService
         return $montants;
     }
 
+    /**
+     * Facture (v5) : aucun prix n'est retouché — seul le devis s'arrondit. Les
+     * lignes gardent leurs prix, et la TVA est calculée devis par devis (clé
+     * « devis_id » de chaque ligne), exactement comme sur chaque devis : la
+     * facture reprend donc au franc près le total des devis facturés.
+     *
+     * Modifie $lignes par référence (total_ht) et retourne [montant_ht, montant_tva, montant_ttc].
+     */
+    public static function totauxSansAjustement(array &$lignes, float $tauxTva): array
+    {
+        foreach ($lignes as &$ligne) {
+            $ligne['total_ht'] = self::totalLigne($ligne);
+        }
+        unset($ligne);
+
+        $ht = $tva = 0;
+        foreach (collect($lignes)->groupBy(fn ($l) => $l['devis_id'] ?? 'sans_devis') as $groupe) {
+            [$h, $t] = self::montants($groupe->all(), $tauxTva);
+            $ht  += $h;
+            $tva += $t;
+        }
+
+        return [$ht, $tva, $ht + $tva];
+    }
+
     /** Total HT d'une ligne, au franc */
     private static function totalLigne(array $ligne): float
     {

@@ -173,7 +173,7 @@ class Avoir extends Model
 
         foreach ($facture->lignes as $ligne) {
             $avoir->lignes()->create($ligne->only([
-                'type', 'designation', 'reference', 'unite', 'quantite', 'prix_unitaire', 'remise', 'total_ht',
+                'type', 'designation', 'reference', 'unite', 'quantite', 'prix_unitaire', 'remise', 'total_ht', 'groupe',
             ]));
         }
 

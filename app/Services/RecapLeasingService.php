@@ -30,6 +30,9 @@ use Illuminate\Support\Facades\DB;
  *               pièces de leurs BC directs reçus — un récap par groupe.
  *               Un BC reçu après la fin de la période passe dans le récap suivant.
  *
+ * Dépannage (v5, pièces sans réception ni devis) : les pièces de son BC reçu
+ * s'ajoutent au récap de la liste du véhicule, comme les BC des bus.
+ *
  * Un OR ou un BC déjà repris dans un autre récap n'est pas compté une seconde fois
  * (les périodes « du 25 au 25 » se touchent le 25).
  */
@@ -91,10 +94,14 @@ class RecapLeasingService
                     ->whereHas('devis', fn ($d) => $d->where('statut', 'accepte')->whereIn('or_id', $ors->pluck('id')))
                     ->sum('total_ht'));
 
-                // Bus : pièces de ses BC directs reçus (prix du magasin), faits jusqu'à la fin
-                // de la période et pas encore comptés — un BC reçu en retard passe au récap suivant
-                $bcs = isset(VehiculeLeasing::GROUPES_BUS[$type]) && $v['vehicule_ids']
-                    ? BonCommande::with('lignes.ligneDevis')->where('leasing_bus', true)
+                // Pièces de ses BC directs reçus (prix du magasin), faits jusqu'à la fin de la
+                // période et pas encore comptés — un BC reçu en retard passe au récap suivant :
+                // BC de dépannage (toutes les listes) et, pour les bus, BC bus leasing
+                $estBus = isset(VehiculeLeasing::GROUPES_BUS[$type]);
+                $bcs = $v['vehicule_ids']
+                    ? BonCommande::with('lignes.ligneDevis')
+                        ->where(fn ($q) => $q->whereHas('depannage', fn ($d) => $d->where('leasing', true))
+                            ->when($estBus, fn ($q2) => $q2->orWhere('leasing_bus', true)))
                         ->whereIn('vehicule_id', $v['vehicule_ids'])
                         ->where('statut', 'recu')
                         ->whereDate('created_at', '<=', $fin)

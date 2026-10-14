@@ -33,7 +33,7 @@ class DossierReception extends Model
         'type_moteur_id', 'entretien_km_seuil',
         'kilometrage_entree', 'niveau_carburant', 'proprete_interne', 'proprete_externe',
         'etat_exterieur', 'motif_entree', 'accessoires_presents', 'liste_accessoires',
-        'equipements', 'dommages_carrosserie', 'signature_client', 'photos', 'fiche_signee',
+        'equipements', 'dommages_carrosserie', 'signature_client', 'signature_client_image', 'photos', 'fiche_signee',
         'date_entree', 'heure_entree', 'urgence', 'notes_internes',
         'statut', 'or_id',
     ];
@@ -114,6 +114,7 @@ class DossierReception extends Model
             'equipements'           => $this->equipements,
             'dommages_carrosserie'  => $this->dommages_carrosserie,
             'signature_client'      => $this->signature_client,
+            'signature_client_image'=> $this->signature_client_image,
             'date_entree'           => $this->date_entree,
             'heure_entree'          => $this->heure_entree,
             'urgence'               => $this->urgence,

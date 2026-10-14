@@ -192,7 +192,8 @@
 
     {{-- ── Tableau des prestations ── --}}
     @php
-        $pieces      = $avoir->lignes->where('type', 'piece');
+        // Ingrédients de peinture / antirouille : une seule ligne par groupe, comme la facture
+        $pieces      = \App\Services\GroupeIngredientsService::regrouper($avoir->lignes->where('type', 'piece'));
         $mo          = $avoir->lignes->whereIn('type', ['main_oeuvre', 'forfait', 'autre']);
         $totalPieces = $pieces->sum('total_ht');
         $totalMo     = $mo->sum('total_ht');

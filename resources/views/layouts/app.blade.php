@@ -179,6 +179,15 @@
             </div>
             @endif
 
+            @if($u->hasPermission('voir_depannages'))
+            <x-nav-link href="{{ route('depannages.index') }}" :active="request()->routeIs('depannages.*')">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                </svg>
+                Dépannages
+            </x-nav-link>
+            @endif
+
             @if($u->hasPermission('voir_reservations'))
             <x-nav-link href="{{ route('reservations.planning') }}" :active="request()->routeIs('reservations.*')">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">

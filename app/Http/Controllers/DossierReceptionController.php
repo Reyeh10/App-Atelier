@@ -10,6 +10,7 @@ use App\Models\LigneDevis;
 use App\Models\Reservation;
 use App\Models\Vehicule;
 use App\Services\EntretienService;
+use App\Services\SignatureService;
 use Illuminate\Http\Request;
 use App\Models\User;
 use Illuminate\Support\Facades\Auth;
@@ -183,7 +184,7 @@ class DossierReceptionController extends Controller
                 \Illuminate\Validation\Rule::exists('clients', 'id')->where('type', 'assurance'),
             ],
             'numero_sinistre'        => ['nullable', 'string', 'max:100'],
-            'signature_client'       => ['boolean'],
+            'signature_client_image' => SignatureService::regles(),
             'photos_vehicule'        => ['required', 'array', 'min:1', 'max:10'],
             'photos_vehicule.*'      => ['file', 'mimes:jpg,jpeg,png,webp', 'max:8192'],
         ], [
@@ -202,7 +203,7 @@ class DossierReceptionController extends Controller
             'urgence.required'            => 'Veuillez sélectionner le niveau d\'urgence.',
             'photos_vehicule.required'    => 'Au moins une photo du véhicule est obligatoire à la réception.',
             'photos_vehicule.min'         => 'Au moins une photo du véhicule est obligatoire à la réception.',
-        ]);
+        ] + SignatureService::messages('signature_client_image'));
 
         // Le motif choisi au wizard suffit déjà — si le réceptionniste n'a rien ajouté,
         // on l'utilise comme texte par défaut (le champ motif_entree n'est pas nullable en base).
@@ -231,7 +232,10 @@ class DossierReceptionController extends Controller
         $data['conseiller_id']        = Auth::id();
         $data['statut']               = 'nouveau';
         $data['accessoires_presents'] = $request->boolean('accessoires_presents');
-        $data['signature_client']     = $request->boolean('signature_client');
+        // Signature électronique du client (obligatoire) : enregistrée en PNG avant
+        // la création, une signature invalide renvoie au formulaire sans rien créer
+        $data['signature_client_image'] = SignatureService::enregistrer($data['signature_client_image'], 'signature_client_image', $data['numero']);
+        $data['signature_client']       = true;
 
         $typeMoteurId = $data['type_moteur_id'] ?? null;
         unset($data['type_moteur_id']);
@@ -287,6 +291,8 @@ class DossierReceptionController extends Controller
 
         if ($devisAvance) {
             $devisAvance->update(['dossier_id' => $dossier->id]);
+            // Accident payé par une assurance : le devis repris est majoré
+            $devisAvance->unsetRelation('dossier')->appliquerMajoration();
             $devisAvance->bonCommande?->update(['dossier_id' => $dossier->id]);
             $dossier->update(['statut' => 'devis_en_cours']);
 
@@ -354,9 +360,40 @@ class DossierReceptionController extends Controller
         ];
 
         $dossier->update($payeur);
+        // Majoration assurance ajoutée ou retirée sur les devis du dossier
+        $dossier->devis()->get()->each->appliquerMajoration();
         Activite::journaliser('changer_payeur', "Dossier {$dossier->numero} : payé par " . ($parAssurance ? "l'assurance " . $dossier->fresh()->assurance?->nom_complet : 'le client'), $dossier);
 
         return back()->with('success', 'Payeur enregistré.');
+    }
+
+    /**
+     * Fiche de réception imprimable dès la réception, sans attendre l'OR —
+     * même gabarit que la fiche imprimée depuis l'OR (ordres-reparations.print).
+     */
+    public function imprimer(DossierReception $dossier)
+    {
+        /** @var User|null $user */
+        $user = Auth::user();
+
+        if (! $user || ! $user->hasPermission('voir_dossiers')) {
+            abort(403);
+        }
+
+        $dossier->load(['client', 'vehicule', 'conseiller']);
+
+        // Case cochée sur la fiche (Normal / Garantie / Sinistre / Entretien) d'après le motif de visite
+        $typeFiche = match ($dossier->motif_visite) {
+            'accident'       => 'sinistre',
+            'service_rapide' => 'entretien',
+            default          => $dossier->type_panne === 'garantie' ? 'garantie' : 'normal',
+        };
+
+        return view('ordres-reparations.print', [
+            'or'        => $dossier,
+            'typeFiche' => $typeFiche,
+            'retour'    => route('dossiers-reception.show', $dossier),
+        ]);
     }
 
     /**

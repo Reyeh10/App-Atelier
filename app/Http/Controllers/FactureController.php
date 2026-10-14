@@ -9,6 +9,7 @@ use App\Models\LigneFacture;
 use App\Models\MarqueGarantie;
 use App\Models\OrdreReparation;
 use App\Services\ArrondiFdjService;
+use App\Services\GroupeIngredientsService;
 use Illuminate\Http\Request;
 use App\Models\User;
 use Illuminate\Support\Facades\Auth;
@@ -111,7 +112,14 @@ class FactureController extends Controller
             ->orderByDesc('id')
             ->get();
 
-        return view('factures.a-facturer', compact('orsAFacturer'));
+        // Dépannages d'un client normal, pièces reçues, pas encore facturés
+        $depannagesAFacturer = \App\Models\Depannage::with(['client', 'vehicule', 'bonCommande.lignes', 'lignes', 'facture'])
+            ->where('leasing', false)
+            ->where(fn ($q) => $q->whereNull('facture_id')->orWhereHas('facture', fn ($f) => $f->where('statut', 'annulee')))
+            ->latest('id')->get()
+            ->filter(fn ($d) => $d->estAFacturer())->values();
+
+        return view('factures.a-facturer', compact('orsAFacturer', 'depannagesAFacturer'));
     }
 
     /**
@@ -284,15 +292,19 @@ class FactureController extends Controller
                     'prix_unitaire' => $ligne['prix_unitaire'],
                     'remise'        => $remise,
                     'total_ht'      => $totalHt,
+                    // Ingrédients de peinture / antirouille repris du devis (une ligne à l'impression)
+                    'groupe'        => GroupeIngredientsService::normaliser($ligne['groupe'] ?? null, $ligne['type']),
+                    // Devis d'origine de la ligne : sert seulement au calcul de la TVA, devis par devis
+                    'devis_id'      => isset($ligne['devis_id']) && ctype_digit((string) $ligne['devis_id']) ? (int) $ligne['devis_id'] : null,
                 ];
             }
 
             // Taux fixe imposé par la direction — non modifiable par le formulaire.
             $tauxTva = 10;
 
-            // Ajuste le prix unitaire de la ligne la plus chère pour que le TTC final
-            // soit un multiple de 5 FDJ (pas de coupure de 1 ni 2 en circulation).
-            [$montantHt, $tva, $ttc] = ArrondiFdjService::arrondir($lignes, $tauxTva);
+            // Seul le devis s'arrondit (TTC multiple de 5 FDJ) : la facture reprend ses
+            // prix et ses totaux tels quels, sans retoucher aucune ligne
+            [$montantHt, $tva, $ttc] = ArrondiFdjService::totauxSansAjustement($lignes, $tauxTva);
             $client = $ordresReparation->client;
 
             // Panne garantie approuvée : le client n'a rien à payer et n'a pas à
@@ -331,7 +343,7 @@ class FactureController extends Controller
 
             // Création des lignes de détail de la facture
             foreach ($lignes as $l) {
-                LigneFacture::create(array_merge($l, ['facture_id' => $facture->id]));
+                LigneFacture::create(array_merge(\Illuminate\Support\Arr::except($l, ['devis_id']), ['facture_id' => $facture->id]));
             }
 
             // L'OR passe au statut "facturé" et on enregistre la date de sortie réelle —
@@ -622,7 +634,9 @@ class FactureController extends Controller
         }
 
         if (! $facture->ordreReparation) {
-            return redirect()->route('factures.show', $facture)->with('error', "Facture flotte : annulez-la par avoir, puis refacturez la livraison depuis l'import flotte.");
+            return redirect()->route('factures.show', $facture)->with('error', $facture->depannage_id
+                ? "Facture de dépannage : annulez-la par avoir, puis refacturez depuis la fiche du dépannage."
+                : "Facture flotte : annulez-la par avoir, puis refacturez la livraison depuis l'import flotte.");
         }
 
         $facture->load(['lignes', 'client', 'marqueGarantie']);
@@ -649,7 +663,9 @@ class FactureController extends Controller
             return redirect()->route('factures.show', $facture)->with('error', 'Cette facture est déjà annulée.');
         }
         if (! $facture->or_id) {
-            return redirect()->route('factures.show', $facture)->with('error', "Facture flotte : annulez-la par avoir, puis refacturez la livraison depuis l'import flotte.");
+            return redirect()->route('factures.show', $facture)->with('error', $facture->depannage_id
+                ? "Facture de dépannage : annulez-la par avoir, puis refacturez depuis la fiche du dépannage."
+                : "Facture flotte : annulez-la par avoir, puis refacturez la livraison depuis l'import flotte.");
         }
 
         $request->validate([
@@ -689,12 +705,14 @@ class FactureController extends Controller
                     'prix_unitaire' => $ligne['prix_unitaire'],
                     'remise'        => $remise,
                     'total_ht'      => round($ligne['quantite'] * $ligne['prix_unitaire'] * (1 - $remise / 100), 2),
+                    'groupe'        => GroupeIngredientsService::normaliser($ligne['groupe'] ?? null, $ligne['type']),
                 ];
             }
 
-            // Même taux et même arrondi FDJ que pour une facture normale
+            // Même taux que pour une facture normale, et comme elle aucun arrondi :
+            // les lignes corrigées gardent exactement les prix saisis
             $tauxTva = 10;
-            [$montantHt, $tva, $ttc] = ArrondiFdjService::arrondir($lignes, $tauxTva);
+            [$montantHt, $tva, $ttc] = ArrondiFdjService::totauxSansAjustement($lignes, $tauxTva);
             $timbre = $request->boolean('frais_timbre') ? 1000 : 0;
 
             // Paiement déjà reçu : reporté sur la nouvelle facture, dans la limite

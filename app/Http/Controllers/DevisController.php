@@ -10,6 +10,7 @@ use App\Models\OrdreReparation;
 use App\Models\User;
 use App\Services\ArrondiFdjService;
 use App\Services\DevisWorkflowService;
+use App\Services\GroupeIngredientsService;
 use App\Services\OperationsMaintenanceService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -1305,11 +1306,6 @@ class DevisController extends Controller
                     'min:0',
                     'max:100',
                 ],
-
-                'lignes.*.prix_manuel' => [
-                    'nullable',
-                    'boolean',
-                ],
             ],
             [
                 'lignes.required' =>
@@ -1376,29 +1372,27 @@ class DevisController extends Controller
         array $lignes,
         array $prixConnus = []
     ): void {
-        $prixSaisissable = $devis->estLibre();
-
-        $lignesCalc = array_map(function ($ligne) use ($prixSaisissable, $prixConnus) {
+        $lignesCalc = array_map(function ($ligne) use ($prixConnus) {
             $quantite     = (float) ($ligne['quantite'] ?? 0);
             $prixUnitaire = (float) ($ligne['prix_unitaire'] ?? 0);
             $remise       = (float) ($ligne['remise'] ?? 0);
-            $prixManuel   = false;
 
-            // Pièce : le prix vient du magasin. Seul un devis sans réception permet
-            // de le saisir à la main (case « Saisir le prix ») ; sinon on garde le
-            // prix déjà connu pour cette pièce (0 tant que le magasin n'a pas répondu).
+            // Pièce : le prix vient toujours du magasin, jamais saisi à la main (v5,
+            // y compris sur un devis sans réception) — on garde le prix déjà connu
+            // pour cette pièce, 0 tant que le magasin n'a pas répondu.
             if (($ligne['type'] ?? null) === 'piece') {
-                $prixManuel = $prixSaisissable && filter_var($ligne['prix_manuel'] ?? false, FILTER_VALIDATE_BOOLEAN);
-                if (! $prixManuel) {
-                    $connue       = $prixConnus[$ligne['designation'] ?? ''] ?? null;
-                    $prixUnitaire = $connue && ! $connue->prix_manuel ? (float) $connue->prix_unitaire : 0.0;
-                }
+                $connue       = $prixConnus[$ligne['designation'] ?? ''] ?? null;
+                $prixUnitaire = $connue ? $connue->prixBase() : 0.0;
             }
 
             return array_merge($ligne, [
                 'quantite'      => $quantite,
                 'prix_unitaire' => $prixUnitaire,
-                'prix_manuel'   => $prixManuel,
+                // Prix avant majoration assurance : saisi (main-d'œuvre) ou du magasin (pièce)
+                'prix_base'     => $prixUnitaire,
+                'prix_manuel'   => false,
+                // Ingrédients de peinture / antirouille : une seule ligne à l'impression
+                'groupe'        => GroupeIngredientsService::normaliser($ligne['groupe'] ?? null, $ligne['type'] ?? null),
                 'remise'        => $remise,
                 'total_ht'      => round($quantite * $prixUnitaire * (1 - $remise / 100), 2),
             ]);
@@ -1416,7 +1410,9 @@ class DevisController extends Controller
                 'reference'     => $reference,
                 'quantite'      => $ligne['quantite'],
                 'prix_unitaire' => $ligne['prix_unitaire'],
+                'prix_base'     => $ligne['prix_base'],
                 'prix_manuel'   => $ligne['prix_manuel'],
+                'groupe'        => $ligne['groupe'],
                 'remise'        => $ligne['remise'],
                 'total_ht'      => $ligne['total_ht'],
             ]);

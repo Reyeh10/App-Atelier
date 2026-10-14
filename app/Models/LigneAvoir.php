@@ -11,7 +11,7 @@ class LigneAvoir extends Model
     protected $table = 'lignes_avoir';
 
     protected $fillable = [
-        'avoir_id', 'type', 'designation', 'reference', 'unite', 'quantite', 'prix_unitaire', 'remise', 'total_ht',
+        'avoir_id', 'type', 'designation', 'reference', 'unite', 'quantite', 'prix_unitaire', 'remise', 'total_ht', 'groupe',
     ];
 
     protected $casts = [

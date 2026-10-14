@@ -25,6 +25,8 @@
 </div>
 @endif
 
+@include('devis._majoration', ['devis' => $devis, 'edition' => true])
+
 {{-- En-tête --}}
 <div class="bg-white rounded-2xl border border-gray-200 p-6">
     <div class="grid grid-cols-3 gap-4">
@@ -72,6 +74,8 @@
         </div>
     </div>
 
+    @include('devis._groupes-ingredients')
+
     <div class="overflow-x-auto">
         <table class="w-full text-sm" id="table-lignes">
             <thead>
@@ -88,8 +92,13 @@
             </thead>
             <tbody id="lignes-body">
                 @foreach($devis->lignes as $i => $ligne)
-                @php $isPiece = $ligne->type === 'piece'; @endphp
-                <tr class="ligne-row border-b border-gray-100" data-index="{{ $i }}">
+                @php
+                    $isPiece = $ligne->type === 'piece';
+                    // Prix avant majoration assurance : la majoration est réappliquée à l'enregistrement
+                    $prixBase  = (int) round($ligne->prixBase());
+                    $totalBase = round((float) $ligne->quantite * $prixBase * (1 - (float) $ligne->remise / 100));
+                @endphp
+                <tr class="ligne-row border-b border-gray-100" data-index="{{ $i }}" data-groupe="{{ $ligne->groupe }}">
                     <td class="px-3 py-3">
                         <select name="lignes[{{ $i }}][type]" onchange="typeChanged(this)"
                                 class="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-orange-500">
@@ -103,6 +112,8 @@
                                oninput="operationInputChanged(this)" onfocus="ouvrirAutocompleteOperation(this)">
                         @if($isPiece && $ligne->disponible === true)
                         <p class="text-[11px] text-green-600 mt-1">✓ Confirmé par le fournisseur</p>
+                        @elseif($isPiece && $ligne->estEnRupture())
+                        <p class="text-[11px] text-orange-600 mt-1">⏳ En rupture au magasin — prix de vente du magasin{{ $ligne->note_fournisseur ? ' — ' . $ligne->note_fournisseur : '' }}</p>
                         @elseif($isPiece && $ligne->disponible === false)
                         <p class="text-[11px] text-red-600 mt-1">⚠ Indisponible{{ $ligne->note_fournisseur ? ' — ' . $ligne->note_fournisseur : '' }}</p>
                         @elseif($isPiece && is_null($ligne->disponible))
@@ -124,7 +135,7 @@
                         </div>
                     </td>
                     <td class="px-3 py-3">
-                        <input type="number" name="lignes[{{ $i }}][prix_unitaire]" value="{{ (int) round($ligne->prix_unitaire) }}" min="0" step="0.01"
+                        <input type="number" name="lignes[{{ $i }}][prix_unitaire]" value="{{ $prixBase }}" min="0" step="0.01"
                                @if($isPiece) readonly title="Prix fourni automatiquement par le magasin" @endif
                                class="w-full border rounded-lg px-2 py-1.5 text-xs text-right ligne-pu {{ $isPiece ? 'border-gray-100 bg-gray-50 text-slate-400 cursor-not-allowed' : 'border-gray-300 focus:outline-none focus:ring-1 focus:ring-orange-500' }}" oninput="calculerLigne(this)">
                     </td>
@@ -133,8 +144,8 @@
                                class="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-right focus:outline-none focus:ring-1 focus:ring-orange-500 ligne-remise" oninput="calculerLigne(this)">
                     </td>
                     <td class="px-3 py-3 text-right">
-                        <span class="font-semibold text-slate-800 ligne-total text-xs">{{ number_format($ligne->total_ht, 0, ',', ' ') }}</span>
-                        <input type="hidden" name="lignes[{{ $i }}][total_ht]" class="ligne-total-input" value="{{ (int) round($ligne->total_ht) }}">
+                        <span class="font-semibold text-slate-800 ligne-total text-xs">{{ number_format($totalBase, 0, ',', ' ') }}</span>
+                        <input type="hidden" name="lignes[{{ $i }}][total_ht]" class="ligne-total-input" value="{{ (int) $totalBase }}">
                     </td>
                     <td class="px-3 py-3 text-center">
                         <button type="button" onclick="supprimerLigne(this)" class="text-red-400 hover:text-red-600 transition-colors">
@@ -339,7 +350,7 @@ function typeChanged(select) {
         qtyInput.placeholder = 'Qté';
         uniteSpan.textContent = 'u';
         uniteSpan.className   = 'ligne-unite text-xs font-bold text-orange-500 w-4 text-center';
-        // Le prix des pièces vient du magasin : champ verrouillé, remis à 0.
+        // Le prix des pièces vient toujours du magasin : champ verrouillé, remis à 0
         puInput.readOnly     = true;
         puInput.title        = 'Prix fourni automatiquement par le magasin';
         puInput.value        = 0;

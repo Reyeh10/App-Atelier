@@ -11,29 +11,19 @@
         .page { width: 210mm; min-height: 297mm; padding: 10mm 13mm 8mm; }
         @media screen {
             html, body { width: 100%; background: #d1d5db; }
-            .page { margin: 55px auto 40px; box-shadow: 0 4px 24px rgba(0,0,0,.18); }
+            .page { margin: 55px auto 40px; box-shadow: 0 4px 24px rgba(0,0,0,.18); background: #fff; }
         }
 
-        /* ── En-tête ── */
-        .header { display: flex; justify-content: space-between; align-items: flex-start;
-                  border-bottom: 3px double #111; padding-bottom: 8px; margin-bottom: 10px; }
-        .header-left  { display: flex; align-items: flex-start; gap: 10px; }
-        .header-logo  { height: 56px; width: auto; flex-shrink: 0; }
-        .company-name { font-size: 13.5pt; font-weight: 900; color: #000; line-height: 1.2; }
-        .company-sub  { font-size: 8.5pt; font-style: italic; color: #333; margin-top: 2px; }
-        .company-tag  { font-size: 7pt; color: #555; margin-top: 4px;
-                        border-top: 1px solid #bbb; padding-top: 3px; }
-        .header-date  { text-align: right; font-size: 10pt; font-weight: 700; white-space: nowrap; padding-top: 6px; }
-
-        /* ── Titre ── */
-        .doc-title { text-align: center; margin: 12px 0 14px; }
-        .doc-title-inner {
-            display: inline-block;
-            font-size: 16pt; font-weight: 900;
-            text-decoration: underline;
-            text-underline-offset: 4px;
-            letter-spacing: 1px;
-        }
+        /* ── En-tête (identique à la facture) ── */
+        .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px; }
+        .company-logo { height: 56px; width: auto; }
+        .company-name { font-size: 11pt; font-weight: 900; text-transform: uppercase; color: #111; margin-top: 4px; }
+        .company-sub  { font-size: 7.5pt; color: #333; font-style: italic; }
+        .doc-meta  { text-align: right; }
+        .doc-city  { font-size: 9pt; color: #333; margin-bottom: 4px; }
+        .doc-title { font-size: 18pt; font-weight: 900; letter-spacing: 1px; color: #111; }
+        .doc-num   { font-size: 13pt; font-weight: 900; color: #111; }
+        hr.thick { border: none; border-top: 2px solid #111; margin: 6px 0 10px; }
 
         /* ── Section client / véhicule ── */
         .cv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 12px; }
@@ -171,7 +161,8 @@
     $client  = $or->client;
     $vehicule = $or->vehicule;
 
-    $lignesPce = $devis->lignes->where('type', 'piece')->values();
+    // Ingrédients de peinture / antirouille : une seule ligne par groupe (somme des prix)
+    $lignesPce = \App\Services\GroupeIngredientsService::regrouper($devis->lignes->where('type', 'piece'))->values();
     $lignesMO  = $devis->lignes->where('type', 'main_oeuvre')->values();
     $lignesAut = $devis->lignes->whereNotIn('type', ['piece','main_oeuvre'])->values();
 
@@ -208,23 +199,21 @@
 
 <div class="page">
 
-    {{-- ── En-tête ── --}}
+    {{-- ── En-tête (identique à la facture) ── --}}
     <div class="header">
-        <div class="header-left">
-            <img src="{{ asset('logo.jpg') }}" alt="STCD" class="header-logo">
-            <div>
-                <div class="company-name">SOCIÉTÉ DE TRANSPORT EN COMMUN DE DJIBOUTI</div>
-                <div class="company-sub">Le professionnalisme au quotidien !</div>
-                <div class="company-tag">TRANSPORT PUBLIC - SCOLAIRE - TOURISTIQUE - PERSONNEL - LOCATION &amp; LEASING DE VÉHICULES - VENTES &amp; MAINTENANCE DES VÉHICULES</div>
-            </div>
+        <div>
+            <img src="{{ asset('logo.jpg') }}" alt="STCD" class="company-logo">
+            <div class="company-name">Société de Transport en Commun de Djibouti</div>
+            <div class="company-sub">Le professionnalisme au quotidien</div>
         </div>
-        <div class="header-date">Djibouti, le {{ $devis->created_at->format('d/m/Y') }}</div>
+        <div class="doc-meta">
+            <div class="doc-city">Djibouti, le {{ $devis->created_at->format('d/m/Y') }}</div>
+            <div class="doc-title">DEVIS N°</div>
+            <div class="doc-num">{{ $devis->numero }}</div>
+        </div>
     </div>
 
-    {{-- ── Titre ── --}}
-    <div class="doc-title">
-        <span class="doc-title-inner">DEVIS N° {{ $devis->numero }}</span>
-    </div>
+    <hr class="thick">
 
     {{-- ── Client & Véhicule ── --}}
     <div class="cv-grid">

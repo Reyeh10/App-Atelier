@@ -75,6 +75,8 @@
 
 @php $attendFournisseur = $devis->attendReponseFournisseur(); @endphp
 
+@include('devis._majoration', ['devis' => $devis])
+
 {{-- Devis établi à l'avance (réservation ou devis libre) --}}
 @if($devis->reservation_id || $devis->client_id)
 <div class="bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3 text-sm text-indigo-700">
@@ -264,6 +266,8 @@
                         {{ $ligne->designation }}
                         @if($ligne->type === 'piece' && $ligne->disponible === true)
                         <span class="block text-xs text-green-600 font-normal mt-0.5">✓ Confirmé par le fournisseur</span>
+                        @elseif($ligne->type === 'piece' && $ligne->estEnRupture())
+                        <span class="block text-xs text-orange-600 font-normal mt-0.5">⏳ En rupture au magasin — prix de vente du magasin ; travaux dès l'arrivée de la pièce{{ $ligne->note_fournisseur ? ' — ' . $ligne->note_fournisseur : '' }}</span>
                         @elseif($ligne->type === 'piece' && $ligne->disponible === false)
                         <span class="block text-xs text-red-600 font-normal mt-0.5">⚠ Indisponible chez le fournisseur{{ $ligne->note_fournisseur ? ' — ' . $ligne->note_fournisseur : '' }}</span>
                         @elseif($ligne->type === 'piece' && is_null($ligne->disponible))

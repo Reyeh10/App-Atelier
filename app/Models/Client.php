@@ -23,6 +23,8 @@ class Client extends Model
         'contact_nom', 'telephone', 'telephone2', 'email',
         'adresse', 'ville', 'wilaya', 'notes',
         'compte_actif', 'plafond_compte',
+        // Assurance : taux de majoration des devis d'accident (vide = taux des Paramètres)
+        'taux_majoration',
     ];
 
     protected $casts = [

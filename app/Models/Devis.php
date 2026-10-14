@@ -32,6 +32,8 @@ class Devis extends Model
         // Feuille de travail propre à un devis complémentaire (cf. OrdreReparation::devisComplementaires())
         'technicien_id', 'service', 'chef_id', 'date_affectation', 'duree_estimee',
         'heure_debut_travaux', 'heure_fin_travaux',
+        // Majoration accident payé par une assurance (cf. appliquerMajoration())
+        'taux_majoration',
     ];
 
     protected $casts = [
@@ -41,11 +43,20 @@ class Devis extends Model
         'montant_tva'     => 'decimal:2',
         'montant_ttc'     => 'decimal:2',
         'taux_tva'        => 'decimal:2',
+        'taux_majoration' => 'decimal:2',
         'date_prevue'         => 'date',
         'date_affectation'    => 'datetime',
         'heure_debut_travaux' => 'datetime',
         'heure_fin_travaux'   => 'datetime',
     ];
+
+    protected static function booted(): void
+    {
+        // Devis d'un accident payé par une assurance : majoré dès sa création
+        static::creating(function (Devis $devis) {
+            $devis->taux_majoration = $devis->tauxMajorationApplicable();
+        });
+    }
 
     // ── Relations ──────────────────────────────────────────────────────
 
@@ -168,9 +179,43 @@ class Devis extends Model
     }
 
     /**
+     * Taux de majoration à appliquer selon qui paie : accident payé par une
+     * assurance → le taux propre de l'assurance, sinon celui des Paramètres
+     * (35 % par défaut) ; payé par le client (ou pas d'accident) → 0.
+     */
+    public function tauxMajorationApplicable(): float
+    {
+        $assurance = ($this->ordreReparation ?? $this->dossier)?->assurance;
+        if (! $assurance) {
+            return 0.0;
+        }
+
+        return (float) ($assurance->taux_majoration ?? ParametreAtelier::get()->taux_majoration_assurance ?? 35);
+    }
+
+    /**
+     * Met le devis au taux de majoration du payeur actuel puis recalcule les prix
+     * depuis les prix de base (majoration ajoutée ou retirée). Appelé quand le
+     * payeur change ou qu'un devis libre est repris par un dossier. Un devis
+     * facturé ne bouge plus.
+     */
+    public function appliquerMajoration(): void
+    {
+        if ($this->estFige()) {
+            return;
+        }
+
+        $taux = $this->tauxMajorationApplicable();
+        if ((float) $this->taux_majoration !== $taux) {
+            $this->update(['taux_majoration' => $taux]);
+        }
+        $this->recalculer();
+    }
+
+    /**
      * Devis sans réception (« devis libre ») : établi sans réservation, pas encore
-     * repris par un dossier ni un OR. Seul ce devis permet de saisir à la main le
-     * prix d'une pièce (sinon le prix vient toujours du magasin).
+     * repris par un dossier ni un OR. Le prix des pièces y vient du magasin, comme
+     * partout (la saisie manuelle de la v4 a été retirée en v5).
      */
     public function estLibre(): bool
     {
@@ -272,14 +317,17 @@ class Devis extends Model
      */
     public function recalculer(): void
     {
-        // Même arrondi qu'à la facture (TTC multiple de 5 FDJ), y compris quand le prix
-        // du magasin arrive après coup : la facture reprend alors exactement le devis
+        // Arrondi FDJ (TTC multiple de 5) fait ici seulement, y compris quand le prix du
+        // magasin arrive après coup : la facture reprend ensuite le devis tel quel, sans arrondir
+        // Prix repartis du prix de base : la majoration assurance (invisible, seuls les
+        // prix montent) est appliquée ici, une seule fois, avant l'arrondi FDJ
+        $coef   = 1 + (float) $this->taux_majoration / 100;
         $lignes = $this->lignes()->get();
         $calcul = $lignes->map(fn (LigneDevis $l) => [
             'id'            => $l->id,
             'type'          => $l->type,
             'quantite'      => (float) $l->quantite,
-            'prix_unitaire' => (float) $l->prix_unitaire,
+            'prix_unitaire' => round($l->prixBase() * $coef),
             'remise'        => (float) $l->remise,
             'total_ht'      => (float) $l->total_ht,
             'prix_manuel'   => (bool) $l->prix_manuel,
@@ -290,6 +338,7 @@ class Devis extends Model
         foreach ($calcul as $c) {
             $ligne = $lignes->firstWhere('id', $c['id']);
             if ((float) $ligne->prix_unitaire !== (float) $c['prix_unitaire'] || (float) $ligne->total_ht !== (float) $c['total_ht']) {
+                $ligne->prixFinal = true;
                 $ligne->update(['prix_unitaire' => $c['prix_unitaire'], 'total_ht' => $c['total_ht']]);
             }
         }

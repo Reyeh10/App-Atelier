@@ -34,7 +34,7 @@ class OrdreReparation extends Model
         // État du véhicule à l'entrée
         'kilometrage_entree', 'entretien_km_seuil', 'niveau_carburant', 'proprete_interne', 'proprete_externe',
         'etat_exterieur', 'motif_entree', 'accessoires_presents', 'liste_accessoires',
-        'equipements', 'dommages_carrosserie', 'signature_client',
+        'equipements', 'dommages_carrosserie', 'signature_client', 'signature_client_image',
         // Dates et planning
         'date_entree', 'heure_entree', 'date_sortie_prevue', 'date_sortie_reelle',
         'urgence', 'notes_internes', 'fiche_signee',
@@ -43,7 +43,7 @@ class OrdreReparation extends Model
         // État du véhicule à la sortie (restitution)
         'kilometrage_sortie', 'niveau_carburant_sortie',
         'proprete_interne_sortie', 'proprete_externe_sortie',
-        'equipements_sortie', 'dommages_carrosserie_sortie', 'notes_restitution', 'signature_restitution',
+        'equipements_sortie', 'dommages_carrosserie_sortie', 'notes_restitution', 'signature_restitution', 'signature_restitution_image',
         'fiche_signee_restitution', 'restitue_par_id',
     ];
 

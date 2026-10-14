@@ -353,6 +353,14 @@ class ClientController extends Controller
                     'numeric',
                     'min:0',
                 ],
+
+                // Assurance : majoration des devis d'accident qu'elle paie (vide = taux des Paramètres)
+                'taux_majoration' => [
+                    'nullable',
+                    'numeric',
+                    'min:0',
+                    'max:100',
+                ],
             ],
             $this->validationMessages()
         );
@@ -415,6 +423,9 @@ class ClientController extends Controller
         | CRÉATION
         |--------------------------------------------------------------------------
         */
+        // Le taux de majoration ne concerne que les assurances
+        $data['taux_majoration'] = ($data['type'] ?? null) === 'assurance' && isset($data['taux_majoration']) && $data['taux_majoration'] !== '' ? (float) $data['taux_majoration'] : null;
+
         $client =
             Client::create($data);
 
@@ -759,6 +770,14 @@ class ClientController extends Controller
                     'numeric',
                     'min:0',
                 ],
+
+                // Assurance : majoration des devis d'accident qu'elle paie (vide = taux des Paramètres)
+                'taux_majoration' => [
+                    'nullable',
+                    'numeric',
+                    'min:0',
+                    'max:100',
+                ],
             ],
             $this->validationMessages()
         );
@@ -846,6 +865,9 @@ class ClientController extends Controller
         | MISE À JOUR
         |--------------------------------------------------------------------------
         */
+        // Le taux de majoration ne concerne que les assurances
+        $data['taux_majoration'] = ($data['type'] ?? $client->type) === 'assurance' && isset($data['taux_majoration']) && $data['taux_majoration'] !== '' ? (float) $data['taux_majoration'] : null;
+
         $client->update($data);
 
         /*

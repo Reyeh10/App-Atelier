@@ -36,6 +36,10 @@ class PermissionService
             'voir_reservations'  => 'Voir les réservations (RDV Service Rapide)',
             'gerer_reservations' => 'Prendre, honorer ou annuler une réservation',
         ],
+        'Dépannage' => [
+            'voir_depannages'  => 'Voir les dépannages',
+            'creer_depannages' => 'Créer un dépannage (pièces + main-d\'œuvre sans réception ni devis)',
+        ],
         'Devis' => [
             'voir_devis'    => 'Voir les devis',
             'gerer_devis'   => 'Créer / modifier / supprimer les devis',
@@ -78,6 +82,7 @@ class PermissionService
             'voir_ordres', 'creer_ordres', 'gerer_ordres', 'affecter_technicien', 'valider_qualite', 'valider_lavage', 'restituer_vehicule',
             'voir_techniciens', 'gerer_techniciens',
             'voir_dossiers', 'creer_dossiers', 'supprimer_dossiers', 'voir_reservations', 'gerer_reservations',
+            'voir_depannages',
             'voir_devis', 'gerer_devis',
             'voir_factures', 'creer_factures', 'encaisser_factures',
             'voir_bons_commande', 'gerer_bons_commande',
@@ -98,11 +103,12 @@ class PermissionService
             'voir_vehicules', 'gerer_vehicules',
             'voir_ordres', 'creer_ordres', 'restituer_vehicule',
             'voir_dossiers', 'creer_dossiers', 'voir_reservations', 'gerer_reservations',
+            'voir_depannages', 'creer_depannages',
             'voir_devis',
         ],
         'caissier' => [
             'voir_clients', 'gerer_compte_credit',
-            'voir_ordres',
+            'voir_ordres', 'voir_depannages',
             'voir_factures', 'creer_factures', 'encaisser_factures',
             'voir_encaissements', 'gerer_encaissements',
         ],

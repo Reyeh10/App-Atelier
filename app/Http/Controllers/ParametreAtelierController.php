@@ -93,6 +93,27 @@ class ParametreAtelierController extends Controller
     }
 
     /**
+     * Taux par défaut de la majoration accident payé par une assurance (35 %).
+     * Ne touche pas aux devis existants : le taux est figé sur chaque devis et
+     * ne change qu'avec le payeur (cf. Devis::appliquerMajoration()).
+     */
+    public function updateMajorationAssurance(Request $request)
+    {
+        $data = $request->validate([
+            'taux_majoration_assurance' => ['required', 'numeric', 'min:0', 'max:100'],
+        ], [
+            'taux_majoration_assurance.required' => 'Indiquez le taux de majoration.',
+            'taux_majoration_assurance.numeric'  => 'Le taux doit être un nombre.',
+            'taux_majoration_assurance.min'      => 'Le taux ne peut pas être négatif.',
+            'taux_majoration_assurance.max'      => 'Le taux ne peut pas dépasser 100 %.',
+        ]);
+
+        ParametreAtelier::get()->update($data);
+
+        return back()->with('success', 'Majoration accident (assurance) par défaut : ' . rtrim(rtrim(number_format($data['taux_majoration_assurance'], 2, ',', ' '), '0'), ',') . ' %.');
+    }
+
+    /**
      * Met à jour la capacité Service Rapide : nombre de véhicules pouvant
      * être pris en charge EN MÊME TEMPS (postes disponibles), utilisée pour
      * le planning des réservations et le contrôle "Sans RDV" à la réception.

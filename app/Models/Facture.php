@@ -22,7 +22,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Facture extends Model
 {
     protected $fillable = [
-        'numero', 'or_id', 'devis_id', 'client_id', 'assurance_id', 'vehicule_id', 'livraison_flotte_id', 'marque_garantie_id', 'encaissement_global_id',
+        'numero', 'or_id', 'devis_id', 'client_id', 'assurance_id', 'vehicule_id', 'livraison_flotte_id', 'depannage_id', 'marque_garantie_id', 'encaissement_global_id',
         'statut', 'mode_paiement',
         'numero_bon_commande_client', 'bon_commande_client_chemin', 'bon_commande_client_nom_original',
         'date_emission', 'date_echeance', 'date_paiement', 'notes', 'frais_timbre',
@@ -69,6 +69,12 @@ class Facture extends Model
     public function livraisonFlotte(): BelongsTo
     {
         return $this->belongsTo(LivraisonFlotte::class);
+    }
+
+    /** Dépannage facturé (pièces + main-d'œuvre sans réception ni devis) */
+    public function depannage(): BelongsTo
+    {
+        return $this->belongsTo(Depannage::class);
     }
 
     /** Facture de pièces livrées à une flotte : ni OR, ni réception */

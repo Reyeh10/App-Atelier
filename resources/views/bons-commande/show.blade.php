@@ -91,6 +91,10 @@
         <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Livraison flotte</p>
         <p class="font-mono font-bold text-slate-900">{{ $bonCommande->livraisonFlotte->import?->numero }}</p>
         <p class="text-xs text-indigo-600 mt-0.5">Pièces livrées le {{ $bonCommande->livraisonFlotte->date_livraison->format('d/m/Y') }} — sans OR</p>
+        @elseif($bonCommande->depannage)
+        <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Dépannage</p>
+        <a href="{{ route('depannages.show', $bonCommande->depannage) }}" class="font-mono font-bold text-orange-600 hover:underline">{{ $bonCommande->depannage->numero }}</a>
+        <p class="text-xs text-indigo-600 mt-0.5">Sans réception ni devis — {{ $bonCommande->depannage->leasing ? 'pièces au récap leasing' : 'facturé après réception du BT' }}</p>
         @else
         <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Dossier de réception</p>
         <p class="font-mono font-bold text-slate-900">{{ $bonCommande->dossier?->numero ?? '—' }}</p>

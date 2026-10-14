@@ -11,6 +11,14 @@
         Voir l'OR {{ $dossier->ordreReparation->numero }} →
     </a>
     @endif
+    <a href="{{ route('dossiers-reception.imprimer', $dossier) }}?apercu=1" target="_blank"
+       class="flex items-center gap-2 text-sm border border-gray-300 text-slate-600 hover:bg-gray-50 rounded-lg px-3 py-2 transition-colors">
+        👁 Fiche réception
+    </a>
+    <a href="{{ route('dossiers-reception.imprimer', $dossier) }}" target="_blank"
+       class="flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 border border-gray-300 rounded-lg px-3 py-2 transition-colors">
+        🖨 Fiche réception
+    </a>
     @if(auth()->user()->isAdmin())
     <a href="{{ route('dossiers-reception.corriger', $dossier) }}"
        class="flex items-center gap-2 text-sm bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg px-3 py-2 transition-colors">
@@ -168,6 +176,15 @@
             <p class="text-slate-700">{{ $dossier->motif_entree }}</p>
         </div>
     </div>
+
+    {{-- Signature électronique du client à la réception --}}
+    @if($dossier->signature_client_image)
+    <div class="px-6 pb-6 border-t border-gray-100 pt-4">
+        <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Signature du client</p>
+        <img src="{{ asset('storage/' . $dossier->signature_client_image) }}" alt="Signature du client"
+             class="h-24 max-w-xs border border-gray-200 rounded-xl bg-white p-2">
+    </div>
+    @endif
 
     {{-- Fiche signée --}}
     @if(auth()->user()->hasPermission('creer_dossiers'))

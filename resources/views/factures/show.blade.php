@@ -10,6 +10,11 @@
        class="flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 border border-gray-300 rounded-lg px-3 py-2 transition-colors">
         ← OR {{ $facture->ordreReparation->numero }}
     </a>
+    @elseif($facture->depannage)
+    <a href="{{ route('depannages.show', $facture->depannage) }}"
+       class="flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 border border-gray-300 rounded-lg px-3 py-2 transition-colors">
+        ← Dépannage {{ $facture->depannage->numero }}
+    </a>
     @endif
     <a href="{{ route('factures.imprimer', $facture) }}?apercu=1" target="_blank"
        class="flex items-center gap-2 text-sm border border-gray-300 text-slate-700 hover:bg-gray-50 rounded-lg px-3 py-2 transition-colors">

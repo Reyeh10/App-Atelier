@@ -78,5 +78,49 @@
     </div>
 </div>
 
+{{-- Dépannages (pièces + main-d'œuvre sans réception) : facturés après réception du BT --}}
+@if($depannagesAFacturer->isNotEmpty())
+<div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+    <div class="px-5 py-3 bg-gray-50 border-b border-gray-200">
+        <h3 class="text-sm font-bold text-slate-700 uppercase tracking-wider">Dépannages à facturer</h3>
+    </div>
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="border-b border-gray-200 bg-gray-50">
+                    <th class="px-5 py-3 text-left text-xs font-semibold text-slate-500">Dépannage</th>
+                    <th class="px-5 py-3 text-left text-xs font-semibold text-slate-500">Véhicule</th>
+                    <th class="px-5 py-3 text-left text-xs font-semibold text-slate-500">Client</th>
+                    <th class="px-5 py-3 text-left text-xs font-semibold text-slate-500">Date</th>
+                    <th class="px-5 py-3 text-right text-xs font-semibold text-slate-500">Montant HT</th>
+                    <th class="px-5 py-3"></th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+                @foreach($depannagesAFacturer as $d)
+                <tr class="hover:bg-gray-50">
+                    <td class="px-5 py-3"><a href="{{ route('depannages.show', $d) }}" class="font-mono text-orange-500 hover:underline text-xs">{{ $d->numero }}</a></td>
+                    <td class="px-5 py-3"><span class="font-mono text-xs text-slate-500">{{ $d->vehicule->immatriculation }}</span></td>
+                    <td class="px-5 py-3 text-slate-700 font-medium">{{ $d->client->nom_complet }}</td>
+                    <td class="px-5 py-3 text-slate-500">{{ $d->date_depannage->format('d/m/Y') }}</td>
+                    <td class="px-5 py-3 text-right font-semibold text-slate-800">{{ number_format($d->montantHt(), 0, ',', ' ') }} FDJ</td>
+                    <td class="px-5 py-3 text-right whitespace-nowrap">
+                        @if($raison = $d->raisonNonFacturable())
+                        <span class="text-xs text-slate-400 font-medium px-4 py-1.5 inline-block" title="{{ $raison }}">Facturation bloquée</span>
+                        @else
+                        <form method="POST" action="{{ route('depannages.facturer', $d) }}" class="inline" onsubmit="return confirm('Créer la facture du dépannage {{ $d->numero }} ?')">
+                            @csrf
+                            <button type="submit" class="text-xs bg-green-500 hover:bg-green-600 text-white font-bold px-4 py-1.5 rounded-lg transition-colors">Créer la facture</button>
+                        </form>
+                        @endif
+                    </td>
+                </tr>
+                @endforeach
+            </tbody>
+        </table>
+    </div>
+</div>
+@endif
+
 </div>
 @endsection

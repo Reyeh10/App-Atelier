@@ -90,7 +90,7 @@ class NotificationService
                 return;
             }
             $bc = $ligne->bonCommande;
-            if (! ($bc?->devis_id || $bc?->leasing_bus) || $bc->lignes()->whereNull('disponible')->exists()) {
+            if (! ($bc?->devis_id || $bc?->leasing_bus || $bc?->depannage_id) || $bc->lignes()->whereNull('disponible')->exists()) {
                 return;
             }
             $lien = route('bons-commande.show', $bc);
